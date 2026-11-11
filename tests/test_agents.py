@@ -4,10 +4,10 @@ from company.agents import agent_summary, load_agents, route_task
 
 
 class AgentRegistryTests(unittest.TestCase):
-    def test_registry_has_exactly_13_unique_agents(self):
+    def test_registry_has_exactly_14_unique_agents(self):
         agents = load_agents()
-        self.assertEqual(len(agents), 13)
-        self.assertEqual(len({agent.id for agent in agents}), 13)
+        self.assertEqual(len(agents), 14)
+        self.assertEqual(len({agent.id for agent in agents}), 14)
         self.assertIn("ceo", {agent.id for agent in agents})
 
     def test_all_agents_require_approval(self):
@@ -23,7 +23,7 @@ class AgentRegistryTests(unittest.TestCase):
 
     def test_summary_does_not_expose_secrets(self):
         summary = agent_summary()
-        self.assertEqual(len(summary), 13)
+        self.assertEqual(len(summary), 14)
         self.assertTrue(all("token" not in item for item in summary))
 
 
