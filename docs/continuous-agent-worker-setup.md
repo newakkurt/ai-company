@@ -7,7 +7,8 @@ The AI Company web process is not a durable worker. Its FastAPI `BackgroundTasks
 This implementation adds a Supabase-backed task consumer:
 - Claims only tasks in `planned` state with `execution_mode=dry_run`.
 - Uses a conditional database update so only one poller can claim a task.
-- Persists each specialist's output as it is generated.
+- Persists each specialist's output as it is generated and checkpoints assignment status.
+- Reclaims an interrupted dry-run task after 60 minutes without a heartbeat, then resumes by skipping agents whose outputs were already saved.
 - Marks the task and assignments `completed` or `failed`.
 - Does not send messages, publish content, deploy, spend money, or modify customer devices.
 - Logs task IDs, counts, and exception classes only; it never prints API keys or model output.
@@ -55,7 +56,7 @@ The second command is the long-running queue consumer intended for a dedicated B
 - `completed`: all assigned agent outputs were persisted.
 - `failed`: an execution error occurred; inspect the task's events and retry only after review.
 
-A process crash after claiming a task can leave it in `running`. Do not automatically reset such tasks without checking whether outputs were already persisted; this avoids duplicate Gemini calls and duplicated outputs. A future lease/heartbeat migration can add automatic stale-task recovery once the basic worker is deployed and observed.
+A process crash after claiming a task leaves it in `running` temporarily. After 60 minutes without a saved output heartbeat, the next poll requeues it. The runner resumes from the persisted agent outputs, avoiding repeat calls for specialists that already completed. A task that raises a handled provider/runtime error is marked `failed` for review rather than retried endlessly.
 
 ## Validation
 
