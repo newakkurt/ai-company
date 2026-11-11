@@ -1,0 +1,60 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from company.agents import load_agents
+from company.store import TaskStore
+from company.worker import process_one_task
+
+
+class FakeProvider:
+    def generate(self, system_prompt, user_prompt):
+        return "Synthetic dry-run analysis. No external action was taken."
+
+
+class BrokenProvider:
+    def generate(self, system_prompt, user_prompt):
+        raise RuntimeError("synthetic provider failure")
+
+
+class ContinuousWorkerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.store = TaskStore(Path(self.temp_dir.name) / "worker.sqlite3")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def make_task(self):
+        task = self.store.create_task("Test continuous analysis worker in dry-run mode")
+        self.store.assign_agents(task["task_id"], [agent.id for agent in load_agents()])
+        return task["task_id"]
+
+    def test_worker_claims_runs_and_persists_all_agent_outputs(self):
+        task_id = self.make_task()
+
+        result = process_one_task(store=self.store, provider=FakeProvider())
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["output_count"], 14)
+        task = self.store.get_task(task_id)
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual(len(task["agent_outputs"]), 14)
+        self.assertTrue(all(a["status"] == "completed" for a in task["assignments"]))
+        self.assertEqual(process_one_task(store=self.store, provider=FakeProvider())["status"], "idle")
+
+    def test_failed_job_is_persisted_and_not_silently_requeued(self):
+        task_id = self.make_task()
+
+        result = process_one_task(store=self.store, provider=BrokenProvider())
+
+        self.assertEqual(result["status"], "failed")
+        task = self.store.get_task(task_id)
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(len(task["agent_outputs"]), 0)
+        self.assertTrue(all(a["status"] == "failed" for a in task["assignments"]))
+        self.assertEqual(process_one_task(store=self.store, provider=FakeProvider())["status"], "idle")
+
+
+if __name__ == "__main__":
+    unittest.main()
