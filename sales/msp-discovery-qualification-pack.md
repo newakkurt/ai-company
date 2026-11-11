@@ -35,7 +35,7 @@ These are uncontacted prospects. Fit is inferred from the services each business
 | N Destek (Istanbul) | Managed business IT, network/VPN, proactive support and cybersecurity | engin@ndestek.com / +90 555 351 46 53 | https://www.ndestek.com/en/about/ |
 | NetWorker (Istanbul) | Network, data center, security and cloud infrastructure; vendor-neutral managed operations | info@networker.com.tr / +90 216 465 97 97 | https://networker.com.tr/en/ |
 
-## Outreach drafts — do not send automatically
+## Outreach drafts — not sent automatically; do not send without human approval
 
 ### IT Spine
 Subject: Multi-vendor network audit reporting for your managed IT customers
