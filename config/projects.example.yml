@@ -1,0 +1,26 @@
+projects:
+  - id: netcontrol
+    name: NetControl
+    path: ../NetControl
+    role: endpoint_and_it_management
+    access: inspect_only
+  - id: netops
+    name: NetOps
+    path: ../NetOps
+    role: network_operations
+    access: inspect_only
+  - id: netcmd
+    name: NetCmd
+    path: ../NetCmd-Site
+    role: network_command_knowledge_and_saas
+    access: inspect_only
+  - id: social-bots
+    name: Social Automation Bots
+    path: ../paylasim-botu
+    role: content_distribution
+    access: inspect_only
+  - id: english-bot
+    name: English Learning Telegram Bot
+    path: ../ingilizce-kaynar
+    role: language_learning
+    access: inspect_only
