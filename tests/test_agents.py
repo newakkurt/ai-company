@@ -18,6 +18,16 @@ class AgentRegistryTests(unittest.TestCase):
         self.assertEqual(routed[0], "ceo")
         self.assertIn("network_infrastructure", routed)
 
+    def test_finance_task_routes_to_cfo(self):
+        routed = route_task("Reconcile monthly BMC subscription revenue, payment fees and settlement")
+        self.assertIn("finance_revenue_ops", routed)
+
+    def test_cfo_has_read_only_scope_and_requires_approval(self):
+        cfo = next(agent for agent in load_agents() if agent.id == "finance_revenue_ops")
+        self.assertTrue(cfo.approval_required)
+        self.assertIn("authorized_billing_metadata_read", cfo.tools)
+        self.assertIn("never access bank credentials", cfo.purpose.lower())
+
     def test_unknown_task_still_has_ceo_owner(self):
         self.assertEqual(route_task("an unrelated unusual request")[0], "ceo")
 
