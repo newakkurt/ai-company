@@ -94,15 +94,6 @@ def main():
         result = process_one_task()
         return 1 if result["status"] == "failed" else 0
 
-    stopping = False
-
-    def request_shutdown(signum, frame):
-        nonlocal stopping
-        stopping = True
-
-    signal.signal(signal.SIGTERM, request_shutdown)
-    signal.signal(signal.SIGINT, request_shutdown)
-
     stop_event = threading.Event()
 
     def request_shutdown(signum, frame):
