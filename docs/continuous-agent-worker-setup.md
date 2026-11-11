@@ -8,7 +8,7 @@ The worker:
 - Claims only tasks in `planned` state with `execution_mode=dry_run`.
 - Uses a conditional database update so only one poller can claim a task.
 - Persists each specialist's output and assignment checkpoint as it is generated.
-- Reclaims an interrupted task after 60 minutes without a saved-output heartbeat, then resumes by skipping agents whose outputs already exist.
+- Reclaims an interrupted task after 5 minutes without a saved-output heartbeat, then resumes by skipping agents whose outputs already exist.
 - Marks completed or failed tasks and records audit events.
 - Does not send messages, publish content, deploy, spend money, or modify customer devices.
 
@@ -45,6 +45,7 @@ Do not copy secret values into GitHub, source code, or chat. The embedded worker
 
 - Live health endpoint: `https://ai-company-ferd.onrender.com/readyz`
 - GitHub scheduled health monitor: `.github/workflows/health-monitor.yml` (every five minutes)
+- GitHub Actions queue-worker backup: `.github/workflows/agent-worker.yml` (every five minutes; processes one task per run when repository secrets are configured)
 - Worker log prefix: `agent_worker:`
 - Queue status: Supabase `tasks.status`
 - Per-agent checkpoint: Supabase `assignments.status` and `agent_outputs`
