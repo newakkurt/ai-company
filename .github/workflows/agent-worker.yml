@@ -63,6 +63,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_DB_GATE_KEY: ${{ secrets.SUPABASE_DB_GATE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AI_COMPANY_GEMINI_MODEL: gemini-3.5-flash-lite
         run: python -m company.worker --once
 
       - name: Report idle or waiting state
