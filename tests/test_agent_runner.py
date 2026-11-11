@@ -45,7 +45,7 @@ class AgentRunnerTests(unittest.TestCase):
         results = run_task(self.task["task_id"], store=self.store, provider=provider)
         self.assertEqual(len(results), 14)
         self.assertEqual(results[-1]["agent_id"], "ceo")
-        self.assertEqual(len(self.store.get_task(self.task["task_id"])["agent_outputs"]), 13)
+        self.assertEqual(len(self.store.get_task(self.task["task_id"])["agent_outputs"]), 14)
 
     def test_runner_rejects_unknown_task(self):
         with self.assertRaises(KeyError):
