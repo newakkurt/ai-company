@@ -1,46 +1,63 @@
 # Continuous AI Agent Worker
 
-## Execution model
+## Production execution model
 
-The AI Company web process is not a durable worker. Its FastAPI `BackgroundTasks` are process-local and can be interrupted by a restart or a free-instance spin-down.
+The AI Company worker runs as an embedded, long-lived Python thread inside the existing Render web service. It uses the existing Render environment variables and polls the Supabase task queue every 15 seconds.
 
-This implementation adds a Supabase-backed task consumer:
+The worker:
 - Claims only tasks in `planned` state with `execution_mode=dry_run`.
 - Uses a conditional database update so only one poller can claim a task.
-- Persists each specialist's output as it is generated and checkpoints assignment status.
-- Reclaims an interrupted dry-run task after 60 minutes without a heartbeat, then resumes by skipping agents whose outputs were already saved.
-- Marks the task and assignments `completed` or `failed`.
+- Persists each specialist's output and assignment checkpoint as it is generated.
+- Reclaims an interrupted task after 60 minutes without a saved-output heartbeat, then resumes by skipping agents whose outputs already exist.
+- Marks completed or failed tasks and records audit events.
 - Does not send messages, publish content, deploy, spend money, or modify customer devices.
-- Logs task IDs, counts, and exception classes only; it never prints API keys or model output.
 
-## Zero-cost polling mode
+## Zero-additional-cost keep-alive
 
-`.github/workflows/agent-worker.yml` starts a one-task worker run every five minutes using GitHub-hosted runners. This avoids creating a paid Render Background Worker and leaves the existing Render web service unchanged.
+The existing Render service is on the Free plan. Render free web services spin down after 15 minutes without inbound traffic and can restart at any time. The hosted readiness workflow therefore pings `/readyz` every five minutes and verifies:
+- `worker.enabled=true`
+- `worker.running=true`
+- Gemini and Supabase are ready
+- all 14 agents are registered
+- `external_actions_enabled=false`
 
-This is recurring polling, **not a guaranteed 24/7 process**. GitHub scheduled workflows can be delayed, and a task only starts when a scheduled/manual workflow run is available. A true always-on Render Background Worker requires a paid Render compute plan; the current Render Free plan does not support worker services.
+This keeps the existing web process active under normal scheduling, without a separate paid Worker or duplicated API secrets in GitHub.
 
-## One-time repository setup
+**Limitations:** this is the best-effort $0 arrangement, not a strict 24/7 SLA. GitHub scheduled workflows may be delayed; Render Free can restart services; and the workspace has a shared 750 free-instance-hour monthly allowance. A dedicated Render Background Worker with guaranteed continuous compute requires a paid plan. Do not claim uninterrupted operation unless the live worker health checks continue passing.
 
-In GitHub, open:
+## Render configuration
 
-`newakkurt/ai-company → Settings → Secrets and variables → Actions → New repository secret`
+Set this additional non-secret environment variable on the existing `ai-company` Render web service:
 
-Create these four secrets by copying the matching values from the existing Render `ai-company` service Environment page. Do not paste secret values into chat, issues, commits, or logs.
+```text
+AI_COMPANY_EMBEDDED_WORKER=true
+```
 
-| Secret name | Source |
-|---|---|
-| `SUPABASE_URL` | Render service environment |
-| `SUPABASE_ANON_KEY` | Render service environment |
-| `SUPABASE_DB_GATE_KEY` | Render service environment |
-| `GEMINI_API_KEY` | Render service environment |
+The service already needs these existing environment variables:
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_DB_GATE_KEY`
+- `GEMINI_API_KEY`
 
-After all four secrets exist, the next five-minute schedule run can consume one pending dry-run task. You can also start it manually from GitHub Actions → Continuous AI Agent Worker → Run workflow.
+Do not copy secret values into GitHub, source code, or chat. The embedded worker reads them from the Render service environment.
 
-If a secret is missing, the workflow safely reports that it is paused and does not fall back to local SQLite.
+## Monitoring
+
+- Live health endpoint: `https://ai-company-ferd.onrender.com/readyz`
+- GitHub scheduled health monitor: `.github/workflows/health-monitor.yml` (every five minutes)
+- Worker log prefix: `agent_worker:`
+- Queue status: Supabase `tasks.status`
+- Per-agent checkpoint: Supabase `assignments.status` and `agent_outputs`
+
+Expected task lifecycle:
+- `planned`: waiting for the worker.
+- `running`: claimed by a worker.
+- `completed`: all assigned agent outputs were persisted.
+- `failed`: a handled execution error occurred; inspect events before retrying.
 
 ## Run locally or on a dedicated worker
 
-With the same four environment variables set securely:
+With the existing four environment variables set securely:
 
 ```bash
 python -m company.worker --once
@@ -49,18 +66,7 @@ python -m company.worker --poll-seconds 15
 
 The second command is the long-running queue consumer intended for a dedicated Background Worker if a paid plan is approved later.
 
-## Recovery and monitoring
-
-- `planned`: waiting for a worker.
-- `running`: claimed by a worker.
-- `completed`: all assigned agent outputs were persisted.
-- `failed`: an execution error occurred; inspect the task's events and retry only after review.
-
-A process crash after claiming a task leaves it in `running` temporarily. After 60 minutes without a saved output heartbeat, the next poll requeues it. The runner resumes from the persisted agent outputs, avoiding repeat calls for specialists that already completed. A task that raises a handled provider/runtime error is marked `failed` for review rather than retried endlessly.
-
 ## Validation
-
-Run:
 
 ```bash
 python -m unittest tests.test_continuous_worker -v

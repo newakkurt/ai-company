@@ -3,7 +3,7 @@ import argparse
 import os
 import signal
 import sys
-import time
+import threading
 
 from .agent_runner import run_task
 from .store import TaskStore
@@ -55,6 +55,25 @@ def process_one_task(store=None, provider=None):
         }
 
 
+def run_forever(stop_event=None, poll_seconds: int = 15):
+    """Poll the durable queue until a shutdown event is received."""
+    stop_event = stop_event or threading.Event()
+    print("agent_worker: polling Supabase queue; analysis_only=true", flush=True)
+    while not stop_event.is_set():
+        try:
+            result = process_one_task()
+            if result["status"] in {"idle", "failed"}:
+                stop_event.wait(poll_seconds)
+        except Exception as exc:
+            print(
+                f"agent_worker: queue poll failed; error_type={type(exc).__name__}",
+                file=sys.stderr,
+                flush=True,
+            )
+            stop_event.wait(poll_seconds)
+    print("agent_worker: shutdown complete", flush=True)
+
+
 def validate_environment():
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if missing:
@@ -75,29 +94,14 @@ def main():
         result = process_one_task()
         return 1 if result["status"] == "failed" else 0
 
-    stopping = False
+    stop_event = threading.Event()
 
     def request_shutdown(signum, frame):
-        nonlocal stopping
-        stopping = True
+        stop_event.set()
 
     signal.signal(signal.SIGTERM, request_shutdown)
     signal.signal(signal.SIGINT, request_shutdown)
-
-    print("agent_worker: polling Supabase queue; analysis_only=true", flush=True)
-    while not stopping:
-        try:
-            result = process_one_task()
-            if result["status"] == "idle":
-                time.sleep(args.poll_seconds)
-        except Exception as exc:
-            print(
-                f"agent_worker: queue poll failed; error_type={type(exc).__name__}",
-                file=sys.stderr,
-                flush=True,
-            )
-            time.sleep(args.poll_seconds)
-    print("agent_worker: shutdown complete", flush=True)
+    run_forever(stop_event=stop_event, poll_seconds=args.poll_seconds)
     return 0
 
 

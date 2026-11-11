@@ -12,14 +12,14 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from company.agents import agent_summary, load_agents
 from company.store import TaskStore
-from company.agent_runner import run_task
+from company.worker import run_forever
 
 ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "web"
@@ -28,8 +28,54 @@ store = TaskStore(DB_PATH)
 app = FastAPI(title="New Akkurt AI Company", version="0.2.1")
 app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
 
-_run_lock = threading.Lock()
-_run_state: dict[str, dict[str, Any]] = {}
+_worker_stop_event = threading.Event()
+_worker_thread: threading.Thread | None = None
+_worker_lock = threading.Lock()
+_WORKER_POLL_SECONDS = 15
+
+def worker_status() -> dict[str, Any]:
+    enabled = os.getenv("AI_COMPANY_EMBEDDED_WORKER", "").strip().lower() == "true"
+    running = bool(_worker_thread and _worker_thread.is_alive())
+    return {
+        "enabled": enabled,
+        "running": running,
+        "mode": "embedded_supabase_poll" if enabled else "disabled",
+        "poll_seconds": _WORKER_POLL_SECONDS,
+    }
+
+
+@app.on_event("startup")
+def start_embedded_worker() -> None:
+    global _worker_thread
+    if os.getenv("AI_COMPANY_EMBEDDED_WORKER", "").strip().lower() != "true":
+        return
+    with _worker_lock:
+        if _worker_thread and _worker_thread.is_alive():
+            return
+        missing = [key for key in (
+            "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY", "GEMINI_API_KEY"
+        ) if not os.getenv(key)]
+        if missing:
+            print("agent_worker: startup blocked; missing environment keys: " + ", ".join(missing), flush=True)
+            return
+        _worker_stop_event.clear()
+        _worker_thread = threading.Thread(
+            target=run_forever,
+            kwargs={"stop_event": _worker_stop_event, "poll_seconds": _WORKER_POLL_SECONDS},
+            name="ai-company-agent-worker",
+            daemon=True,
+        )
+        _worker_thread.start()
+        print("agent_worker: embedded worker started; analysis_only=true", flush=True)
+
+
+@app.on_event("shutdown")
+def stop_embedded_worker() -> None:
+    _worker_stop_event.set()
+    thread = _worker_thread
+    if thread and thread.is_alive():
+        thread.join(timeout=25)
+    print("agent_worker: embedded worker shutdown requested", flush=True)
 
 
 class TaskInput(BaseModel):
@@ -86,13 +132,16 @@ def healthz():
 def readiness():
     provider = provider_status()
     database = database_status()
+    worker = worker_status()
+    worker_ready = not worker["enabled"] or worker["running"]
     return {
         "ok": True,
-        "ready": bool(provider["ready"] and database["connected"]),
+        "ready": bool(provider["ready"] and database["connected"] and worker_ready),
         "service": "ai-company",
         "agents": len(load_agents()),
         "provider": provider,
         "database": database,
+        "worker": worker,
         "mode": "analysis_only",
         "external_actions_enabled": False,
     }
@@ -130,6 +179,7 @@ def status():
         "mode": "analysis_only",
         "external_actions_enabled": False,
         "database": database_status(),
+        "worker": worker_status(),
     }
 
 
@@ -148,7 +198,6 @@ def task_detail(task_id: str):
     item = store.get_task(task_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    item["run_state"] = _run_state.get(task_id, {"status": "not_started"})
     return item
 
 
@@ -159,40 +208,33 @@ def create_task(payload: TaskInput):
     return {"task_id": item["task_id"], "status": "planned", "assigned_agents": len(load_agents())}
 
 
-def _execute_analysis(task_id: str) -> None:
-    state = _run_state.setdefault(task_id, {})
-    state.update(status="queued", message="Waiting for the analysis worker.")
-    _run_lock.acquire()
-    try:
-        state.update(status="running", message="14 role agents are preparing analysis with Gemini 3.8 Flash.")
-        results = run_task(task_id, store=store)
-        state.update(status="completed", result_count=len(results), message="Analysis saved.")
-    except Exception as exc:
-        state.update(status="failed", message=f"Analysis failed: {type(exc).__name__}")
-    finally:
-        _run_lock.release()
-
-
 @app.post("/api/tasks/{task_id}/run", dependencies=[Depends(require_api_key)])
-def start_analysis(task_id: str, background: BackgroundTasks):
+def start_analysis(task_id: str):
     item = store.get_task(task_id)
     if item is None:
         raise HTTPException(status_code=404, detail="Task not found")
     if not provider_status()["ready"]:
         raise HTTPException(status_code=503, detail="Gemini 3.8 Flash is not configured.")
-    current = _run_state.get(task_id, {}).get("status")
-    if current == "running":
+    if item["status"] == "running":
         return {"task_id": task_id, "status": "running"}
-    _run_state[task_id] = {"status": "queued"}
-    background.add_task(_execute_analysis, task_id)
-    return {"task_id": task_id, "status": "queued"}
+    if item["status"] == "completed":
+        return {"task_id": task_id, "status": "completed"}
+    if item["status"] == "failed":
+        raise HTTPException(status_code=409, detail="Task failed; inspect persisted events before retrying.")
+    return {"task_id": task_id, "status": "queued", "worker": worker_status()}
 
 
 @app.get("/api/tasks/{task_id}/run-status", dependencies=[Depends(require_api_key)])
 def analysis_status(task_id: str):
-    if store.get_task(task_id) is None:
+    item = store.get_task(task_id)
+    if item is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    return _run_state.get(task_id, {"status": "not_started"})
+    return {
+        "task_id": task_id,
+        "status": item["status"],
+        "output_count": len(item.get("agent_outputs", [])),
+        "worker": worker_status(),
+    }
 
 
 def _verify_bmc_signature(raw_body: bytes, secret: str, signature: str) -> bool:
@@ -210,7 +252,7 @@ def _iso_timestamp(value: Any) -> str | None:
 
 
 @app.post("/webhooks/buymeacoffee")
-async def buymeacoffee_webhook(request: Request, background: BackgroundTasks,
+async def buymeacoffee_webhook(request: Request,
                                signature: str | None = Header(default=None, alias="x-signature-sha256")):
     secret = os.getenv("BMC_WEBHOOK_SECRET", "")
     if not secret:
@@ -293,14 +335,10 @@ async def buymeacoffee_webhook(request: Request, background: BackgroundTasks,
     store.upsert_membership(membership)
     store.record_payment_event(event_key, event_type, subscription_id)
 
-    run_status = _run_state.get(task_id, {}).get("status")
-    if event_type in {"membership.started", "membership.updated"} and not task.get("agent_outputs") and run_status not in {"queued", "running", "completed"}:
-        _run_state[task_id] = {"status": "queued", "message": "Paid membership received; specialist analysis queued."}
-        background.add_task(_execute_analysis, task_id)
     return {"ok": True, "membership_status": "active", "task_id": task_id,
             "assigned_agents": len(load_agents())}
 
 
 @app.get("/api/health", dependencies=[Depends(require_api_key)])
 def private_health():
-    return {"ok": True, "provider": provider_status(), "agent_count": len(load_agents())}
+    return {"ok": True, "provider": provider_status(), "agent_count": len(load_agents()), "worker": worker_status()}
