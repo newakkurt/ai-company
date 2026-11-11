@@ -45,8 +45,9 @@ Onay komutu yalnızca onay kaydı oluşturur; görevi çalıştırmaz.
 2. Token'ı yerel .env dosyasına koy; GitHub'a veya sohbete gönderme.
 3. Numeric chat ID'ni öğren ve allowlist'e ekle.
 4. TELEGRAM_BOT_TOKEN ve TELEGRAM_ALLOWED_CHAT_IDS değişkenlerini ayarla.
-5. `python -m company.cli telegram-poll` komutunu çalıştır.
-6. Telegram'da `/task Görev açıklaması` gönder.
+5. Terminalde `set -a; source .env; set +a` komutuyla değişkenleri yükle.
+6. `python -m company.cli telegram-poll` komutunu çalıştır.
+7. Telegram'da `/task Görev açıklaması` gönder.
 
 Örnek .env (değerleri kendinle değiştir):
 ```dotenv
