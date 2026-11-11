@@ -1,0 +1,2 @@
+site,device_name,vendor,model,software_version,management_ip,interface,port_role,admin_status,oper_status,speed,duplex,vlan_or_trunk,description,neighbor,errors_or_discards,last_change_utc,evidence_reference,owner_confirmed_unused,notes
+Example-Site,SW-ACCESS-01,Huawei,S5731,VRP-x.x,192.0.2.10,GE1/0/1,HYPOTHETICAL_ACCESS,up,up,1G,full,10,Example desk outlet,EXAMPLE-PC,0,2026-01-01T00:00:00Z,synthetic-demo-001,false,SYNTHETIC DATA ONLY
