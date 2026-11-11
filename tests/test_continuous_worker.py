@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from company.agents import load_agents
+from company.llm import GeminiAPIError
 from company.store import TaskStore
 from company.worker import process_one_task
 
@@ -23,7 +24,7 @@ class CountingProvider(FakeProvider):
 
 class BrokenProvider:
     def generate(self, system_prompt, user_prompt):
-        raise RuntimeError("synthetic provider failure")
+        raise GeminiAPIError("Gemini API returned HTTP 403; check key access, model, and quota.")
 
 
 class ContinuousWorkerTests(unittest.TestCase):
@@ -87,6 +88,9 @@ class ContinuousWorkerTests(unittest.TestCase):
         self.assertEqual(task["status"], "failed")
         self.assertEqual(len(task["agent_outputs"]), 0)
         self.assertTrue(all(a["status"] == "failed" for a in task["assignments"]))
+        failed_event = next(event for event in task["events"] if event["event_type"] == "agent_task_failed")
+        self.assertEqual(failed_event["details"]["error_type"], "GeminiAPIError")
+        self.assertIn("HTTP 403", failed_event["details"]["error_summary"])
         self.assertEqual(process_one_task(store=self.store, provider=FakeProvider())["status"], "idle")
 
 
