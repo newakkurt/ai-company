@@ -43,11 +43,13 @@ Onay komutu yalnızca onay kaydı oluşturur; görevi çalıştırmaz.
 ## Telegram görev alımı
 1. BotFather üzerinden ayrı bir AI Company botu oluştur.
 2. Token'ı yerel .env dosyasına koy; GitHub'a veya sohbete gönderme.
-3. Numeric chat ID'ni öğren ve allowlist'e ekle.
-4. TELEGRAM_BOT_TOKEN ve TELEGRAM_ALLOWED_CHAT_IDS değişkenlerini ayarla.
-5. Terminalde `set -a; source .env; set +a` komutuyla değişkenleri yükle.
-6. `python -m company.cli telegram-poll` komutunu çalıştır.
-7. Telegram'da `/task Görev açıklaması` gönder.
+3. Önce yalnızca token'ı .env dosyasına ekle ve terminalde `set -a; source .env; set +a` komutuyla yükle.
+4. Botuna Telegram'dan `/start` gönder.
+5. `python -m company.cli telegram-id` komutuyla bekleyen mesajlardan numeric chat ID'ni al. Bu komut yalnızca ID'leri gösterir; mesaj metinlerini yazdırmaz. Aktif polling başlamadan önce çalıştır.
+6. ID'ni TELEGRAM_ALLOWED_CHAT_IDS değişkenine ekle; token ve ID'yi kimseyle paylaşma.
+7. Değişkenleri tekrar yükle: `set -a; source .env; set +a`.
+8. `python -m company.cli telegram-poll` komutunu çalıştır.
+9. Telegram'da `/task Görev açıklaması` gönder.
 
 Örnek .env (değerleri kendinle değiştir):
 ```dotenv
