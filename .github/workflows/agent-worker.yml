@@ -1,6 +1,12 @@
 name: Continuous AI Agent Worker
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/agent-worker.yml"
+      - "company/**"
+      - "requirements.txt"
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
