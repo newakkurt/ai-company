@@ -56,7 +56,9 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
             "delete data, or change network devices."
             f"{specialist_context}"
         )
+        print(f"agent_worker: requesting agent={agent.id} task={task_id}", flush=True)
         output = provider.generate(build_system_prompt(agent), prompt)
         store.record_agent_output(task_id, agent.id, output)
+        print(f"agent_worker: saved agent={agent.id} task={task_id}", flush=True)
         results.append({"agent_id": agent.id, "output": output})
     return results
