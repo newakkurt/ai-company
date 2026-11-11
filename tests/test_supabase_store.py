@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import unittest
@@ -59,7 +58,7 @@ class SupabaseTaskStoreTests(unittest.TestCase):
         with patch("company.store.uuid.uuid4") as uuid4:
             uuid4.return_value.hex = "testtask000000000000000000000000"
             task = self.store.create_task("Test cloud persistence")
-        self.assertEqual(task["task_id"], "task-test")
+        self.assertEqual(task["task_id"], "task-testtask00")
         self.assertTrue(task["approval_required"])
         self.assertEqual(mocked_urlopen.call_count, 6)
 
