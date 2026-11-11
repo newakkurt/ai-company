@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
+import json
 import os
+import re
 import threading
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -94,8 +99,26 @@ def readiness():
 
 
 @app.get("/")
+def storefront():
+    return FileResponse(WEB_DIR / "sales.html")
+
+
+@app.get("/sales")
+def sales_page():
+    return FileResponse(WEB_DIR / "sales.html")
+
+
+@app.get("/admin")
 def dashboard():
     return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/checkout")
+def checkout():
+    target = os.getenv("BMC_PRO_CHECKOUT_URL", "https://buymeacoffee.com/sevketkaynar").strip()
+    if not target.startswith("https://buymeacoffee.com/"):
+        raise HTTPException(status_code=503, detail="Secure checkout URL is not configured.")
+    return RedirectResponse(target, status_code=303)
 
 
 @app.get("/api/status", dependencies=[Depends(require_api_key)])
@@ -170,6 +193,110 @@ def analysis_status(task_id: str):
     if store.get_task(task_id) is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return _run_state.get(task_id, {"status": "not_started"})
+
+
+def _verify_bmc_signature(raw_body: bytes, secret: str, signature: str) -> bool:
+    if not secret or not signature:
+        return False
+    expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature.strip().lower())
+
+
+def _iso_timestamp(value: Any) -> str | None:
+    try:
+        return datetime.fromtimestamp(int(value), tz=timezone.utc).isoformat() if value else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+@app.post("/webhooks/buymeacoffee")
+async def buymeacoffee_webhook(request: Request, background: BackgroundTasks,
+                               signature: str | None = Header(default=None, alias="x-signature-sha256")):
+    secret = os.getenv("BMC_WEBHOOK_SECRET", "")
+    if not secret:
+        raise HTTPException(status_code=503, detail="Buy Me a Coffee webhook is not configured.")
+    raw_body = await request.body()
+    if not _verify_bmc_signature(raw_body, secret, signature or ""):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature.")
+    try:
+        event = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+
+    event_id = str(event.get("event_id", "")).strip()
+    event_type = str(event.get("type", "")).strip()
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    if not event_id or not event_type:
+        raise HTTPException(status_code=400, detail="Missing event_id or type.")
+    if event.get("live_mode") is not True:
+        return {"ok": True, "ignored": "test_event"}
+    event_key = f"bmc-{event_id}"
+    if store.get_payment_event(event_key):
+        return {"ok": True, "duplicate": True}
+
+    supported = {"membership.started", "membership.updated", "membership.cancelled", "membership.paused"}
+    if event_type not in supported:
+        store.record_payment_event(event_key, event_type, None)
+        return {"ok": True, "ignored": "unsupported_event"}
+
+    subscription_id = str(data.get("id") or data.get("psp_id") or "").strip()
+    if not subscription_id or len(subscription_id) > 120:
+        raise HTTPException(status_code=400, detail="Missing or invalid subscription identifier.")
+    safe_subscription_id = re.sub(r"[^A-Za-z0-9_-]", "-", subscription_id)[:100]
+    task_id = f"bmc-sub-{safe_subscription_id}"
+    existing = store.get_membership(subscription_id)
+
+    if event_type in {"membership.cancelled", "membership.paused"}:
+        if existing:
+            status = "canceled" if event_type.endswith("cancelled") else "paused"
+            updated = {**existing, "status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
+            store.upsert_membership(updated)
+        store.record_payment_event(event_key, event_type, subscription_id)
+        return {"ok": True, "membership_status": "updated" if existing else "not_found"}
+
+    expected_level = os.getenv("BMC_PRO_MEMBERSHIP_LEVEL_ID", "").strip()
+    if not expected_level:
+        raise HTTPException(status_code=503, detail="PRO membership level ID is not configured.")
+    try:
+        level_id = int(data.get("membership_level_id", -1))
+        expected_price = Decimal(os.getenv("BMC_PRO_PRICE_USD", "69"))
+        amount = Decimal(str(data.get("amount", "0")))
+    except (ValueError, InvalidOperation):
+        raise HTTPException(status_code=400, detail="Invalid membership price or level.")
+    currency = str(data.get("currency", "")).upper()
+    if level_id != int(expected_level) or currency != "USD" or amount != expected_price:
+        store.record_payment_event(event_key, event_type, subscription_id)
+        return {"ok": True, "ignored": "not_the_configured_netcmd_pro_plan"}
+    if str(data.get("status", "active")).lower() not in {"active", "succeeded"}:
+        store.record_payment_event(event_key, event_type, subscription_id)
+        return {"ok": True, "ignored": "membership_not_active"}
+
+    task = store.create_task(
+        "Paid NetCmd PRO customer onboarding: prepare a safe, evidence-led network audit workflow. "
+        "No customer credentials, direct device access, configuration changes, or external actions are permitted.",
+        task_id=task_id,
+    )
+    store.assign_agents(task_id, [agent.id for agent in load_agents()])
+    membership = {
+        "subscription_id": subscription_id,
+        "supporter_email": data.get("supporter_email"),
+        "supporter_name": data.get("supporter_name"),
+        "membership_level_id": level_id,
+        "membership_level_name": data.get("membership_level_name"),
+        "amount": float(amount),
+        "currency": currency,
+        "status": "active",
+        "current_period_end": _iso_timestamp(data.get("current_period_end")),
+        "task_id": task_id,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    store.upsert_membership(membership)
+    store.record_payment_event(event_key, event_type, subscription_id)
+
+    if event_type == "membership.started" and not task.get("agent_outputs"):
+        background.add_task(_execute_analysis, task_id)
+    return {"ok": True, "membership_status": "active", "task_id": task_id,
+            "assigned_agents": len(load_agents())}
 
 
 @app.get("/api/health", dependencies=[Depends(require_api_key)])
