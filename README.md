@@ -49,6 +49,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```powershell
 python -m company.cli agents
 python -m company.cli plan "Huawei switch SNMP network audit"
+python -m company.cli plan --all-agents "Şirket genel strateji ve proje denetimi"
 python -m company.cli list
 python -m company.cli remember "Network lab" "Huawei SNMP test notları" --tags "network,huawei,snmp"
 python -m company.cli recall "Huawei SNMP"
