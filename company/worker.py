@@ -12,7 +12,6 @@ REQUIRED_ENV = (
     "SUPABASE_URL",
     "SUPABASE_ANON_KEY",
     "SUPABASE_DB_GATE_KEY",
-    "GEMINI_API_KEY",
 )
 
 
@@ -80,6 +79,8 @@ def run_forever(stop_event=None, poll_seconds: int = 15):
 
 def validate_environment():
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if not (os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY")):
+        missing.append("GEMINI_API_KEY or GROQ_API_KEY")
     if missing:
         raise RuntimeError("Missing required worker secrets: " + ", ".join(missing))
 
