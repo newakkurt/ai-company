@@ -29,7 +29,7 @@ Python 3.10+ ve Git gerekir.
 ```powershell
 git clone https://github.com/newakkurt/ai-company.git
 cd ai-company
-git checkout feature/sqlite-task-approval
+git checkout main
 
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -87,6 +87,20 @@ Bot polling çalışırken makine ve internet bağlantısı açık kalmalıdır.
 python -m unittest discover -s tests -v
 ```
 GitHub Actions ayrıca Python 3.10, 3.11 ve 3.12 üzerinde testleri çalıştırır.
+
+## Bulut paneli (Render)
+
+Bu sürüm FastAPI tabanlı bir panel ve korumalı görev API'si içerir:
+- Render başlangıç komutu: `uvicorn app:app --host 0.0.0.0 --port $PORT`
+- Sağlık kontrolü: `/healthz`
+- Panel: ana sayfa
+- API: `/api/agents`, `/api/tasks`, `/api/tasks/{id}/run`
+- Sunucuda `AI_COMPANY_API_KEY` tanımlanmadan yönetim API'si kapalıdır.
+- Bulut modeli için Render ortam değişkenlerine `GEMINI_API_KEY` eklenmelidir. Anahtarı GitHub'a veya sohbet mesajına koyma.
+- İsteğe bağlı model adı: `AI_COMPANY_GEMINI_MODEL=gemini-2.5-flash`.
+- 13 rol bir göreve atanabilir; `run` analiz üretir, dış işlem yapmaz.
+
+**Kalıcı veri notu:** Varsayılan SQLite yolu Render'ın geçici dosya alanındadır. Yeniden başlatma veya yeniden deploy sonrasında görev geçmişi kaybolabilir. Kalıcı üretim kullanımı için AI Company'ye ait ayrı bir PostgreSQL/Supabase veritabanı bağlanmalıdır; NetCmd veritabanı kullanılmamalıdır.
 
 ## Dokümantasyon
 - [13 ajan işletim modeli](docs/AGENTS.md)
