@@ -62,19 +62,45 @@ class SupabaseTaskStore:
             "created_at": utc_now(),
         }, prefer="return=minimal")
 
-    def create_task(self, description: str) -> dict:
+    def create_task(self, description: str, task_id: str | None = None) -> dict:
         description = description.strip()
         if not description:
             raise ValueError("Task description cannot be empty")
-        task_id = f"task-{uuid.uuid4().hex[:10]}"
+        task_id = task_id or f"task-{uuid.uuid4().hex[:10]}"
         now = utc_now()
-        self._request("tasks", "POST", body={
+        self._request("tasks", "POST", {"on_conflict": "task_id"}, {
             "task_id": task_id, "description": description, "status": "planned",
             "owner": "ceo", "execution_mode": "dry_run", "approval_required": True,
             "created_at": now, "updated_at": now,
-        }, prefer="return=minimal")
-        self._event(task_id, "task_created", "user", {"mode": "dry_run"})
+        }, "resolution=ignore-duplicates,return=minimal")
+        if not self.get_task(task_id):
+            raise RuntimeError("Task creation could not be confirmed")
         return self.get_task(task_id)
+
+    def get_payment_event(self, event_id: str):
+        rows = self._request("payment_events", params={
+            "select": "event_id,event_type,subscription_id,processed,received_at",
+            "event_id": f"eq.{event_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
+    def record_payment_event(self, event_id: str, event_type: str, subscription_id: str | None):
+        self._request("payment_events", "POST", {"on_conflict": "event_id"}, {
+            "event_id": event_id, "event_type": event_type,
+            "subscription_id": subscription_id, "processed": True,
+            "received_at": utc_now(),
+        }, "resolution=ignore-duplicates,return=minimal")
+
+    def get_membership(self, subscription_id: str):
+        rows = self._request("memberships", params={
+            "select": "*", "subscription_id": f"eq.{subscription_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
+    def upsert_membership(self, membership: dict):
+        self._request("memberships", "POST", {"on_conflict": "subscription_id"}, membership,
+                      "resolution=merge-duplicates,return=minimal")
+        return self.get_membership(membership["subscription_id"])
 
     def assign_agents(self, task_id: str, agent_ids: list[str]):
         now = utc_now()
@@ -230,6 +256,18 @@ class TaskStore:
                     note_id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
                     tags TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS payment_events (
+                    event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL,
+                    subscription_id TEXT, processed INTEGER NOT NULL DEFAULT 1,
+                    received_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS memberships (
+                    subscription_id TEXT PRIMARY KEY, supporter_email TEXT,
+                    supporter_name TEXT, membership_level_id INTEGER NOT NULL,
+                    membership_level_name TEXT, amount REAL NOT NULL, currency TEXT NOT NULL,
+                    status TEXT NOT NULL, current_period_end TEXT, task_id TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
                 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
                 CREATE INDEX IF NOT EXISTS idx_assignments_task ON assignments(task_id);
@@ -237,22 +275,57 @@ class TaskStore:
                 CREATE INDEX IF NOT EXISTS idx_knowledge_created ON knowledge_notes(created_at);
             """)
 
-    def create_task(self, description: str) -> dict:
+    def create_task(self, description: str, task_id: str | None = None) -> dict:
         description = description.strip()
         if not description:
             raise ValueError("Task description cannot be empty")
-        task_id = f"task-{uuid.uuid4().hex[:10]}"
+        task_id = task_id or f"task-{uuid.uuid4().hex[:10]}"
         now = utc_now()
         with self._connect() as db:
-            db.execute(
-                """INSERT INTO tasks
+            cursor = db.execute(
+                """INSERT OR IGNORE INTO tasks
                 (task_id, description, status, owner, execution_mode,
                  approval_required, created_at, updated_at)
                 VALUES (?, ?, 'planned', 'ceo', 'dry_run', 1, ?, ?)""",
                 (task_id, description, now, now)
             )
-            self._event(db, task_id, "task_created", "user", {"mode": "dry_run"})
+            if cursor.rowcount:
+                self._event(db, task_id, "task_created", "user", {"mode": "dry_run"})
         return self.get_task(task_id)
+
+    def get_payment_event(self, event_id: str):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM payment_events WHERE event_id=?", (event_id,)).fetchone()
+            return dict(row) if row else None
+
+    def record_payment_event(self, event_id: str, event_type: str, subscription_id: str | None):
+        with self._connect() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO payment_events (event_id,event_type,subscription_id,processed,received_at) VALUES (?,?,?,?,?)",
+                (event_id, event_type, subscription_id, 1, utc_now())
+            )
+
+    def get_membership(self, subscription_id: str):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM memberships WHERE subscription_id=?", (subscription_id,)).fetchone()
+            return dict(row) if row else None
+
+    def upsert_membership(self, membership: dict):
+        fields = ("subscription_id","supporter_email","supporter_name","membership_level_id",
+                  "membership_level_name","amount","currency","status","current_period_end","task_id","updated_at")
+        values = [membership.get(field) for field in fields]
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO memberships (subscription_id,supporter_email,supporter_name,membership_level_id,
+                membership_level_name,amount,currency,status,current_period_end,task_id,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(subscription_id) DO UPDATE SET
+                supporter_email=excluded.supporter_email,supporter_name=excluded.supporter_name,
+                membership_level_id=excluded.membership_level_id,membership_level_name=excluded.membership_level_name,
+                amount=excluded.amount,currency=excluded.currency,status=excluded.status,
+                current_period_end=excluded.current_period_end,task_id=excluded.task_id,updated_at=excluded.updated_at""",
+                values
+            )
+        return self.get_membership(membership["subscription_id"])
 
     def _event(self, db, task_id, event_type, actor, details):
         db.execute(
