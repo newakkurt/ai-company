@@ -11,4 +11,7 @@ data/tasks/*.json
 data/approvals/*.json
 data/reports/*
 !data/reports/.gitkeep
+data/company.db
+data/company.db-shm
+data/company.db-wal
 .DS_Store
