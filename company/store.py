@@ -525,7 +525,7 @@ class TaskStore:
                 "output_count": output_count, "mode": "analysis_only"
             })
 
-    def fail_task(self, task_id: str, error_type: str):
+    def fail_task(self, task_id: str, error_type: str, error_summary: str | None = None):
         with self._connect() as db:
             now = utc_now()
             db.execute(
