@@ -202,7 +202,7 @@ class SupabaseTaskStore:
             "output_count": output_count, "mode": "analysis_only"
         })
 
-    def fail_task(self, task_id: str, error_type: str):
+    def fail_task(self, task_id: str, error_type: str, error_summary: str | None = None):
         now = utc_now()
         self._request("tasks", "PATCH", {
             "task_id": f"eq.{task_id}", "status": "eq.running",
@@ -210,9 +210,10 @@ class SupabaseTaskStore:
         self._request("assignments", "PATCH", {
             "task_id": f"eq.{task_id}", "status": "in.(suggested,running)",
         }, {"status": "failed"}, "return=minimal")
-        self._event(task_id, "agent_task_failed", "worker", {
-            "error_type": error_type, "retry_policy": "manual_review"
-        })
+        details = {"error_type": error_type, "retry_policy": "manual_review"}
+        if error_summary:
+            details["error_summary"] = error_summary[:240]
+        self._event(task_id, "agent_task_failed", "worker", details)
 
     def remember(self, title: str, body: str, tags: list[str] | None = None):
         title, body = title.strip(), body.strip()
@@ -524,7 +525,7 @@ class TaskStore:
                 "output_count": output_count, "mode": "analysis_only"
             })
 
-    def fail_task(self, task_id: str, error_type: str):
+    def fail_task(self, task_id: str, error_type: str, error_summary: str | None = None):
         with self._connect() as db:
             now = utc_now()
             db.execute(
@@ -535,9 +536,10 @@ class TaskStore:
                 "UPDATE assignments SET status='failed' WHERE task_id=? AND status IN ('suggested','running')",
                 (task_id,)
             )
-            self._event(db, task_id, "agent_task_failed", "worker", {
-                "error_type": error_type, "retry_policy": "manual_review"
-            })
+            details = {"error_type": error_type, "retry_policy": "manual_review"}
+            if error_summary:
+                details["error_summary"] = error_summary[:240]
+            self._event(db, task_id, "agent_task_failed", "worker", details)
 
     def remember(self, title: str, body: str, tags: list[str] | None = None):
         title, body = title.strip(), body.strip()
