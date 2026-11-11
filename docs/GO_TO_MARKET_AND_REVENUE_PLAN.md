@@ -33,7 +33,7 @@ Public payment page configured in data/site.json: https://buymeacoffee.com/sevke
 
 ### A. Buy Me a Coffee — NetCmd PRO
 - Existing public BMC page is configured as the support / membership destination.
-- NetCmd README specifies a NetCmd PRO recurring membership at USD 22/month.
+- NetCmd's currently inspected README/config previously showed USD 22/month. Owner has now selected USD 69/month as the new target price for the AI-enhanced NetCmd PRO offer. This is a pricing decision, not yet a live checkout change.
 - Customer must use the same email address for Buy Me a Coffee and their NetCmd account; the signed webhook maps supporter email to auth.users.
 - Only the configured PRO membership level grants Premium. One-time coffee donations do NOT grant Premium.
 - Expected webhook events: membership.started, membership.updated, membership.cancelled, membership.paused.
@@ -71,20 +71,21 @@ NetCmd README and supabase/iban_orders.sql describe:
 - Keep bank account values, webhook secrets, service-role keys and payment credentials only in their intended protected provider/Render/Supabase secret stores.
 - Never read, export, repeat, store or transmit secret values to AI Company agents. Share only safe metadata: provider, product, currency, amount, billing interval, event types, statuses, timestamps and masked references.
 - Reconcile BMC gross receipts, fees, refunds, cancellations and net payouts against actual provider settlement records.
-- Use USD 22/month as the only currently configured public recurring price; report the USD 5,000 goal as net collected revenue before tax/operating costs. Never treat the illustrative 257-member calculation as a forecast.
+- Target price approved by owner: USD 69/month for AI-enhanced NetCmd PRO. The live BMC membership tier and NetCmd display config still require synchronized manual/provider-side update and verification. Until then, the live checkout remains unverified and must not be advertised as $69. Report the USD 5,000 goal as net collected revenue before tax/operating costs.
 - Reconcile bank-transfer orders against the actual bank statement; only owner/admin confirmation changes an order to paid.
 - Separate revenue earned, payment reported, payment confirmed, provider payout pending and bank settlement received.
 - CFO must never initiate transfers, change payout bank details, issue refunds or spend money without explicit owner approval.
 
 ## 4. Pricing and product packaging — DECISION
 The following is the single consistent commercial policy until real customer data justifies a reviewed change:
-- Public self-serve product: NetCmd PRO at the existing USD 22/month recurring price through the existing Buy Me a Coffee membership tier. Keep this price; do not silently change the live checkout.
-- Combined offer: NetCmd PRO plus optional, supervised network audit / implementation assistance. The software remains USD 22/month. Hands-on work is quoted individually after scope discovery; do not publish a made-up fixed service price or imply it is included free.
+- Public self-serve product: AI-enhanced NetCmd PRO target price is USD 69/month recurring through the existing Buy Me a Coffee membership page. This is the owner's approved target price; it is NOT live until the BMC PRO membership tier is changed and tested, and NetCmd's displayed price is synchronized.
+- Combined offer: NetCmd PRO at USD 69/month plus optional, supervised network audit / implementation assistance. Hands-on work is quoted individually after scope discovery; do not publish a made-up fixed service price or imply it is included free.
+- Until checkout and site configuration are verified at USD 69, do not claim that customers can currently purchase at that price; keep the current checkout's actual price authoritative.
 - One-time coffee support is a donation/support payment only and never activates PRO.
 - Bank transfer remains a separate manual-verification path. No automatic entitlement until an owner/admin verifies the actual bank receipt and approves the order.
 - Do not create extra public tiers or change prices until product limits, customer demand, support capacity, taxes and checkout behavior have been verified.
 
-Revenue target definition: USD 5,000/month in net collected revenue after platform/payment fees, before tax and operating expenses. It is a target, not a forecast. At USD 22/month, using BMC's published fee examples (5% platform + 2.9% + USD 0.30 processing + 0.5% payout + possible 1% international + 0.5% subscription), an illustrative all-surcharges estimate is about USD 19.52 net per successful monthly payment; roughly 257 active monthly members would be needed to reach USD 5,000 from memberships alone. Actual net varies by payer country, card, currency, payout route and dashboard fee settings; CFO must use actual settlement records, not this estimate. See the official fee explanation: https://help.buymeacoffee.com/en/articles/8105744-how-to-calculate-charges-on-your-payment.
+Revenue target definition: USD 5,000/month in net collected revenue after platform/payment fees, before tax and operating expenses. It is a target, not a forecast. At USD 69/month, using BMC's published fee examples (5% platform + 2.9% + USD 0.30 processing + 0.5% payout + possible 1% international + 0.5% subscription), an illustrative all-surcharges estimate is about USD 61.87 net per successful monthly payment; roughly 81 active monthly members would be needed to reach USD 5,000 from memberships alone. Actual net varies by payer country, card, currency, payout route and dashboard fee settings; CFO must use actual settlement records, not this estimate. See the official fee explanation: https://help.buymeacoffee.com/en/articles/8105744-how-to-calculate-charges-on-your-payment.
 
 Other offers (USD 49/month Starter, USD 99/month Pro, USD 149+/month MSP, one-time guided audit USD 150–500) remain unvalidated hypotheses and must not be published as active offers. Before introducing further bundles, define supported vendors, device/site limits, report retention, support response, cancellation/refund terms and exclusions. Never promise unattended production changes.
 
