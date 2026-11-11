@@ -15,6 +15,7 @@ def main():
     task.add_argument("description")
     plan = sub.add_parser("plan", help="Create a task and suggest agent assignments")
     plan.add_argument("description")
+    plan.add_argument("--all-agents", action="store_true", help="Assign all 13 roles instead of keyword-selected specialists")
     run = sub.add_parser("run", help="Run local-model analysis for a planned task (analysis only)")
     run.add_argument("task_id")
     remember = sub.add_parser("remember", help="Save a local company knowledge note")
@@ -47,8 +48,9 @@ def main():
         print(f"Task: {item['task_id']}")
         print(f"Status: {item['status']} | Mode: {item['execution_mode']}")
         if args.command == "plan":
-            from .agents import route_task
-            assignments = store.assign_agents(item["task_id"], route_task(args.description))
+            from .agents import load_agents, route_task
+            agent_ids = [agent.id for agent in load_agents()] if args.all_agents else route_task(args.description)
+            assignments = store.assign_agents(item["task_id"], agent_ids)
             print("Suggested agents:")
             for assignment in assignments:
                 print(f"- {assignment['agent_id']} ({assignment['status']})")
