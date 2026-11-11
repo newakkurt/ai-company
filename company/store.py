@@ -139,6 +139,51 @@ class SupabaseTaskStore:
             "order": "created_at.asc",
         })
 
+    def claim_next_task(self):
+        """Atomically claim one analysis-only task; concurrent pollers cannot claim it twice."""
+        rows = self._request("tasks", params={
+            "select": "task_id", "status": "eq.planned",
+            "execution_mode": "eq.dry_run", "order": "created_at.asc",
+            "limit": "1",
+        })
+        if not rows:
+            return None
+        task_id = rows[0]["task_id"]
+        claimed = self._request("tasks", "PATCH", {
+            "task_id": f"eq.{task_id}", "status": "eq.planned",
+            "execution_mode": "eq.dry_run",
+        }, {"status": "running", "updated_at": utc_now()}, "return=representation")
+        if not claimed:
+            return None
+        now = utc_now()
+        self._request("assignments", "PATCH", {
+            "task_id": f"eq.{task_id}", "status": "eq.suggested",
+        }, {"status": "running"}, "return=minimal")
+        self._event(task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
+        return task_id
+
+    def complete_task(self, task_id: str, output_count: int):
+        now = utc_now()
+        self._request("tasks", "PATCH", {
+            "task_id": f"eq.{task_id}", "status": "eq.running",
+        }, {"status": "completed", "updated_at": now}, "return=minimal")
+        self._request("assignments", "PATCH", {"task_id": f"eq.{task_id}"},
+                      {"status": "completed"}, "return=minimal")
+        self._event(task_id, "agent_task_completed", "worker", {
+            "output_count": output_count, "mode": "analysis_only"
+        })
+
+    def fail_task(self, task_id: str, error_type: str):
+        now = utc_now()
+        self._request("tasks", "PATCH", {
+            "task_id": f"eq.{task_id}", "status": "eq.running",
+        }, {"status": "failed", "updated_at": now}, "return=minimal")
+        self._request("assignments", "PATCH", {"task_id": f"eq.{task_id}"},
+                      {"status": "failed"}, "return=minimal")
+        self._event(task_id, "agent_task_failed", "worker", {
+            "error_type": error_type, "retry_policy": "manual_review"
+        })
+
     def remember(self, title: str, body: str, tags: list[str] | None = None):
         title, body = title.strip(), body.strip()
         if not title or not body:
@@ -380,6 +425,54 @@ class TaskStore:
                 (task_id,)
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def claim_next_task(self):
+        """Atomically claim one analysis-only task; concurrent pollers cannot claim it twice."""
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                """SELECT task_id FROM tasks
+                   WHERE status='planned' AND execution_mode='dry_run'
+                   ORDER BY created_at ASC LIMIT 1"""
+            ).fetchone()
+            if row is None:
+                return None
+            task_id = row["task_id"]
+            now = utc_now()
+            changed = db.execute(
+                """UPDATE tasks SET status='running', updated_at=?
+                   WHERE task_id=? AND status='planned' AND execution_mode='dry_run'""",
+                (now, task_id)
+            ).rowcount
+            if not changed:
+                return None
+            db.execute("UPDATE assignments SET status='running' WHERE task_id=? AND status='suggested'", (task_id,))
+            self._event(db, task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
+            return task_id
+
+    def complete_task(self, task_id: str, output_count: int):
+        with self._connect() as db:
+            now = utc_now()
+            db.execute(
+                "UPDATE tasks SET status='completed', updated_at=? WHERE task_id=? AND status='running'",
+                (now, task_id)
+            )
+            db.execute("UPDATE assignments SET status='completed' WHERE task_id=?", (task_id,))
+            self._event(db, task_id, "agent_task_completed", "worker", {
+                "output_count": output_count, "mode": "analysis_only"
+            })
+
+    def fail_task(self, task_id: str, error_type: str):
+        with self._connect() as db:
+            now = utc_now()
+            db.execute(
+                "UPDATE tasks SET status='failed', updated_at=? WHERE task_id=? AND status='running'",
+                (now, task_id)
+            )
+            db.execute("UPDATE assignments SET status='failed' WHERE task_id=?", (task_id,))
+            self._event(db, task_id, "agent_task_failed", "worker", {
+                "error_type": error_type, "retry_policy": "manual_review"
+            })
 
     def remember(self, title: str, body: str, tags: list[str] | None = None):
         title, body = title.strip(), body.strip()
