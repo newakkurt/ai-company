@@ -6,7 +6,8 @@
 - [ ] Windows installation and local tests verified by owner
 
 ## Phase 1 — 13-role orchestration foundation
-- [x] 13-agent registry with unique roles and capability boundaries
+- [x] 14-agent registry with unique roles and capability boundaries
+- [x] Read-only CFO role registered and covered by routing/permission tests
 - [x] Deterministic task routing and suggested assignments
 - [x] SQLite task, assignment, audit, and agent-output records
 - [x] Human approval record (record-only; never triggers execution)
@@ -18,6 +19,7 @@
 ## Phase 2 — Safe integrations
 - [x] Telegram allowlisted task intake (local task creation only)
 - [ ] GitHub read-only project inspection adapter
+- [ ] Durable hosted worker with leases, retries, idempotency and dead-letter handling
 - [ ] Isolated adapters for the user's existing projects
 - [ ] QA report and release evidence workflow
 - [ ] Optional Obsidian-compatible Markdown export
