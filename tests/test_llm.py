@@ -3,7 +3,12 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from company.llm import GeminiAPIError, GeminiProvider
+from company.llm import (
+    FallbackProvider,
+    GeminiAPIError,
+    GeminiProvider,
+    GroqProvider,
+)
 
 
 class FakeResponse:
@@ -23,6 +28,45 @@ class FakeResponse:
 class GeminiProviderTests(unittest.TestCase):
     def test_default_model_is_flash_lite_for_high_volume_worker(self):
         self.assertEqual(GeminiProvider.DEFAULT_MODEL, "gemini-3.5-flash-lite")
+
+    def test_groq_provider_uses_bearer_header_and_configured_model(self):
+        response = FakeResponse(
+            b'{"choices":[{"message":{"content":"Groq OK"}}]}'
+        )
+        with patch("company.llm.urlopen", return_value=response) as request:
+            provider = GroqProvider(api_key="groq-test-key")
+            self.assertEqual(provider.generate("system", "user"), "Groq OK")
+
+        sent_request = request.call_args.args[0]
+        self.assertEqual(sent_request.full_url, GroqProvider.ENDPOINT)
+        self.assertEqual(sent_request.get_header("Authorization"), "Bearer groq-test-key")
+        self.assertNotIn("groq-test-key", sent_request.full_url)
+        self.assertEqual(request.call_args.kwargs["timeout"], 45)
+
+    def test_fallback_uses_groq_when_gemini_quota_is_exhausted(self):
+        class Primary:
+            def generate(self, *_args):
+                raise GeminiAPIError("Gemini API returned HTTP 429; quota exhausted")
+
+        class Fallback:
+            def generate(self, *_args):
+                return "Fallback output"
+
+        provider = FallbackProvider(Primary(), Fallback())
+        self.assertEqual(provider.generate("system", "user"), "Fallback output")
+
+    def test_fallback_does_not_hide_invalid_gemini_key(self):
+        class Primary:
+            def generate(self, *_args):
+                raise GeminiAPIError("Gemini API returned HTTP 401")
+
+        class Fallback:
+            def generate(self, *_args):
+                raise AssertionError("Fallback must not run for invalid credentials")
+
+        provider = FallbackProvider(Primary(), Fallback())
+        with self.assertRaises(GeminiAPIError):
+            provider.generate("system", "user")
 
     def test_api_key_is_sent_in_header_not_url(self):
         response = FakeResponse(
