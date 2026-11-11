@@ -1,4 +1,4 @@
-"""Local SQLite task, assignment, and audit store. No execution engine."""
+"""Local SQLite task, assignment, agent-output, and audit store."""
 from datetime import datetime, timezone
 from pathlib import Path
 import json
@@ -29,34 +29,29 @@ class TaskStore:
         with self._connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS tasks (
-                    task_id TEXT PRIMARY KEY,
-                    description TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    owner TEXT NOT NULL,
-                    execution_mode TEXT NOT NULL,
+                    task_id TEXT PRIMARY KEY, description TEXT NOT NULL,
+                    status TEXT NOT NULL, owner TEXT NOT NULL, execution_mode TEXT NOT NULL,
                     approval_required INTEGER NOT NULL DEFAULT 1,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS events (
-                    event_id TEXT PRIMARY KEY,
-                    task_id TEXT NOT NULL REFERENCES tasks(task_id),
-                    event_type TEXT NOT NULL,
-                    actor TEXT NOT NULL,
-                    details_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    event_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
+                    event_type TEXT NOT NULL, actor TEXT NOT NULL,
+                    details_json TEXT NOT NULL, created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS assignments (
-                    assignment_id TEXT PRIMARY KEY,
-                    task_id TEXT NOT NULL REFERENCES tasks(task_id),
-                    agent_id TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'suggested',
-                    assigned_at TEXT NOT NULL,
-                    UNIQUE(task_id, agent_id)
+                    assignment_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
+                    agent_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'suggested',
+                    assigned_at TEXT NOT NULL, UNIQUE(task_id, agent_id)
+                );
+                CREATE TABLE IF NOT EXISTS agent_outputs (
+                    output_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
+                    agent_id TEXT NOT NULL, output_text TEXT NOT NULL, created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
                 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
                 CREATE INDEX IF NOT EXISTS idx_assignments_task ON assignments(task_id);
+                CREATE INDEX IF NOT EXISTS idx_agent_outputs_task ON agent_outputs(task_id);
             """)
 
     def create_task(self, description: str) -> dict:
@@ -111,6 +106,27 @@ class TaskStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def record_agent_output(self, task_id: str, agent_id: str, output_text: str):
+        with self._connect() as db:
+            if db.execute("SELECT 1 FROM tasks WHERE task_id=?", (task_id,)).fetchone() is None:
+                raise KeyError(f"Task not found: {task_id}")
+            now = utc_now()
+            db.execute(
+                "INSERT INTO agent_outputs (output_id, task_id, agent_id, output_text, created_at) VALUES (?, ?, ?, ?, ?)",
+                (uuid.uuid4().hex, task_id, agent_id, output_text, now)
+            )
+            self._event(db, task_id, "agent_analysis_saved", agent_id,
+                        {"output_chars": len(output_text), "execution": "analysis_only"})
+        return True
+
+    def list_agent_outputs(self, task_id: str):
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT agent_id, output_text, created_at FROM agent_outputs WHERE task_id=? ORDER BY created_at",
+                (task_id,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def get_task(self, task_id: str):
         with self._connect() as db:
             row = db.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
@@ -121,8 +137,7 @@ class TaskStore:
             item["events"] = [
                 {**dict(e), "details": json.loads(e["details_json"])}
                 for e in db.execute(
-                    "SELECT * FROM events WHERE task_id=? ORDER BY created_at",
-                    (task_id,)
+                    "SELECT * FROM events WHERE task_id=? ORDER BY created_at", (task_id,)
                 ).fetchall()
             ]
             item["assignments"] = [
@@ -131,6 +146,7 @@ class TaskStore:
                     (task_id,)
                 ).fetchall()
             ]
+            item["agent_outputs"] = self.list_agent_outputs(task_id)
             return item
 
     def list_tasks(self, limit: int = 20):
