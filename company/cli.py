@@ -13,6 +13,8 @@ def main():
     task.add_argument("description")
     plan = sub.add_parser("plan", help="Create a task and suggest agent assignments")
     plan.add_argument("description")
+    run = sub.add_parser("run", help="Run local-model analysis for a planned task (analysis only)")
+    run.add_argument("task_id")
     sub.add_parser("list", help="List recent tasks")
     approve = sub.add_parser("approve", help="Record human approval; does not execute")
     approve.add_argument("task_id")
@@ -30,18 +32,29 @@ def main():
         for index, agent in enumerate(agent_summary(), 1):
             print(f"{index:02d}. {agent['name']} [{agent['id']}]")
             print(f"    {agent['purpose']}")
-        print("Mode: role registry and deterministic routing; no autonomous execution.")
+        print("Mode: role registry + local model analysis; no external actions.")
     elif args.command in ("task", "plan"):
-        item = TaskStore().create_task(args.description)
+        store = TaskStore()
+        item = store.create_task(args.description)
         print(f"Task: {item['task_id']}")
         print(f"Status: {item['status']} | Mode: {item['execution_mode']}")
         if args.command == "plan":
             from .agents import route_task
-            assignments = TaskStore().assign_agents(item["task_id"], route_task(args.description))
+            assignments = store.assign_agents(item["task_id"], route_task(args.description))
             print("Suggested agents:")
             for assignment in assignments:
                 print(f"- {assignment['agent_id']} ({assignment['status']})")
-        print("Saved locally. No agent or external action was executed.")
+        print("Saved locally. No agent analysis or external action was executed.")
+    elif args.command == "run":
+        from .agent_runner import run_task
+        try:
+            results = run_task(args.task_id)
+        except (KeyError, RuntimeError) as exc:
+            parser.error(str(exc))
+        for result in results:
+            print(f"\n=== {result['agent_id']} ===\n")
+            print(result["output"])
+        print("\nAnalysis saved locally. No external action was executed.")
     elif args.command == "list":
         items = TaskStore().list_tasks()
         if not items:
@@ -79,7 +92,7 @@ def main():
         try:
             bot.poll_forever()
         except KeyboardInterrupt:
-            print("\\nTelegram intake stopped.")
+            print("\nTelegram intake stopped.")
 
 
 if __name__ == "__main__":
