@@ -71,17 +71,22 @@ NetCmd README and supabase/iban_orders.sql describe:
 - Keep bank account values, webhook secrets, service-role keys and payment credentials only in their intended protected provider/Render/Supabase secret stores.
 - Never read, export, repeat, store or transmit secret values to AI Company agents. Share only safe metadata: provider, product, currency, amount, billing interval, event types, statuses, timestamps and masked references.
 - Reconcile BMC gross receipts, fees, refunds, cancellations and net payouts against actual provider settlement records.
+- Use USD 22/month as the only currently configured public recurring price; report the USD 5,000 goal as net collected revenue before tax/operating costs. Never treat the illustrative 257-member calculation as a forecast.
 - Reconcile bank-transfer orders against the actual bank statement; only owner/admin confirmation changes an order to paid.
 - Separate revenue earned, payment reported, payment confirmed, provider payout pending and bank settlement received.
 - CFO must never initiate transfers, change payout bank details, issue refunds or spend money without explicit owner approval.
 
-## 4. Pricing and product packaging
-Existing NetCmd price found:
-- NetCmd PRO: USD 22/month via BMC membership configuration.
+## 4. Pricing and product packaging — DECISION
+The following is the single consistent commercial policy until real customer data justifies a reviewed change:
+- Public self-serve product: NetCmd PRO at the existing USD 22/month recurring price through the existing Buy Me a Coffee membership tier. Keep this price; do not silently change the live checkout.
+- Combined offer: NetCmd PRO plus optional, supervised network audit / implementation assistance. The software remains USD 22/month. Hands-on work is quoted individually after scope discovery; do not publish a made-up fixed service price or imply it is included free.
+- One-time coffee support is a donation/support payment only and never activates PRO.
+- Bank transfer remains a separate manual-verification path. No automatic entitlement until an owner/admin verifies the actual bank receipt and approves the order.
+- Do not create extra public tiers or change prices until product limits, customer demand, support capacity, taxes and checkout behavior have been verified.
 
-Other offers (USD 49/month Starter, USD 99/month Pro, USD 149+/month MSP, one-time guided audit USD 150–500) are only unvalidated hypotheses from the earlier business plan. They are NOT current NetCmd checkout prices and must not be published as active offers without owner approval and product/terms verification.
+Revenue target definition: USD 5,000/month in net collected revenue after platform/payment fees, before tax and operating expenses. It is a target, not a forecast. At USD 22/month, using BMC's published fee examples (5% platform + 2.9% + USD 0.30 processing + 0.5% payout + possible 1% international + 0.5% subscription), an illustrative all-surcharges estimate is about USD 19.52 net per successful monthly payment; roughly 257 active monthly members would be needed to reach USD 5,000 from memberships alone. Actual net varies by payer country, card, currency, payout route and dashboard fee settings; CFO must use actual settlement records, not this estimate. See the official fee explanation: https://help.buymeacoffee.com/en/articles/8105744-how-to-calculate-charges-on-your-payment.
 
-Before introducing combined bundles, define supported vendors, device/site limits, report retention, support response, cancellation/refund terms and exclusions. Never promise unattended production changes.
+Other offers (USD 49/month Starter, USD 99/month Pro, USD 149+/month MSP, one-time guided audit USD 150–500) remain unvalidated hypotheses and must not be published as active offers. Before introducing further bundles, define supported vendors, device/site limits, report retention, support response, cancellation/refund terms and exclusions. Never promise unattended production changes.
 
 ## 5. Agent responsibilities
 Current registry has 13 roles:
@@ -98,7 +103,7 @@ Current registry has 13 roles:
 - Security: privacy, secrets, access and threat review.
 - Memory: approved decisions and lessons.
 
-Gap: current 13-role registry has no independent CFO / Finance & Revenue Operations agent. A 14th role is recommended but is NOT yet implemented. Until then, Data Analyst prepares read-only finance summaries and CEO reviews them. Do not claim an independent CFO is active.
+Gap and decision: create a dedicated 14th role named CFO / Finance & Revenue Operations. This is the approved target design, but it is NOT active until the agent registry, permissions and worker tests are changed and verified. Until then, Data Analyst prepares read-only finance summaries and CEO reviews them. CFO permissions must be read-only for provider/billing metadata and reports; no secrets, bank credentials, payout changes, refunds, transfers or spending authority.
 
 ## 6. Operating cadence (after worker/scheduler is implemented)
 Daily:
