@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 from company.agent_runner import run_task
 from company.store import TaskStore
@@ -26,6 +26,14 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(saved["execution_mode"], "dry_run")
         self.assertEqual(saved["status"], "planned")
         self.assertTrue(all(a["status"] == "suggested" for a in saved["assignments"]))
+
+    def test_ceo_runs_last_and_receives_specialist_analysis(self):
+        provider = Mock()
+        provider.generate.side_effect = ["Specialist result", "CEO summary"]
+        results = run_task(self.task["task_id"], store=self.store, provider=provider)
+        self.assertEqual(results[-1]["agent_id"], "ceo")
+        ceo_prompt = provider.generate.call_args_list[-1].args[1]
+        self.assertIn("Specialist result", ceo_prompt)
 
     def test_runner_rejects_unknown_task(self):
         with self.assertRaises(KeyError):
