@@ -40,7 +40,11 @@ def process_one_task(store=None, provider=None):
     except Exception as exc:
         # Only log the exception class. Never emit provider responses or credentials.
         try:
-            store.fail_task(task_id, error_type=type(exc).__name__)
+            store.fail_task(
+                task_id,
+                error_type=type(exc).__name__,
+                error_summary=str(exc) if type(exc).__name__ == "GeminiAPIError" else None,
+            )
         finally:
             print(
                 f"agent_worker: failed task {task_id}; "
