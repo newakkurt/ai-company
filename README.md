@@ -1,15 +1,15 @@
 # New Akkurt AI Company
 
-Bağımsız, modüler, 13 rol ajanlı ve insan-onaylı AI şirketi orkestrasyon çatısı.
+Bağımsız, modüler, 14 rol ajanlı ve insan-onaylı AI şirketi orkestrasyon çatısı.
 
 ## Neler var?
-- 13 uzman rol: CEO, proje yönetimi, teknoloji mimarisi, yazılım, network/altyapı, araştırma, pazarlama, içerik, ürün/iş, veri, hafıza, QA ve güvenlik.
+- 14 uzman rol: CEO, proje yönetimi, teknoloji mimarisi, yazılım, network/altyapı, araştırma, pazarlama, içerik, ürün/iş, veri, hafıza, QA, güvenlik ve CFO/finans operasyonları.
 - SQLite görev, ajan ataması, analiz çıktısı ve denetim kaydı.
 - Yerel bilgi hafızası: `remember` / `recall`.
 - Şeffaf anahtar-kelime yönlendirmesi ve isteğe bağlı yerel Ollama modeli.
 - İsteğe bağlı, izin listeli Telegram görev alımı.
 
-**Önemli:** 13 rol tanımlı ve yerel modelle analiz yapabilecek altyapı hazırdır. Model bağlı değilken ajanlar arka planda bağımsız çalışan servisler değildir. Görev yönlendirme deterministiktir; LLM çıktıları öneridir, doğrulanmış gerçek değildir.
+**Önemli:** 14 rol tanımlı ve yerel modelle analiz yapabilecek altyapı hazırdır. Model bağlı değilken ajanlar arka planda bağımsız çalışan servisler değildir. Görev yönlendirme deterministiktir; LLM çıktıları öneridir, doğrulanmış gerçek değildir.
 
 ## Ücretsiz / yerel öncelikli
 Python + SQLite + isteğe bağlı Ollama. Bulut LLM API anahtarı zorunlu değildir. Yerel modelin çalışması için Ollama ve seçilen modelin bilgisayara kurulması gerekir.
@@ -98,7 +98,7 @@ Bu sürüm FastAPI tabanlı bir panel ve korumalı görev API'si içerir:
 - Sunucuda `AI_COMPANY_API_KEY` tanımlanmadan yönetim API'si kapalıdır.
 - Bulut modeli için Render ortam değişkenlerine `GEMINI_API_KEY` eklenmelidir. Anahtarı GitHub'a veya sohbet mesajına koyma.
 - İsteğe bağlı model adı: `AI_COMPANY_GEMINI_MODEL=gemini-2.5-flash`.
-- 13 rol bir göreve atanabilir; `run` analiz üretir, dış işlem yapmaz.
+- 14 rol bir göreve atanabilir; `run` analiz üretir, dış işlem yapmaz.
 
 **Kalıcı veri:** Render üzerinde `SUPABASE_URL`, `SUPABASE_ANON_KEY` ve yalnızca sunucuda tutulan `SUPABASE_DB_GATE_KEY` tanımlıysa görevler ayrı Supabase PostgreSQL veritabanına yazılır. Bu projede RLS açık, özel anahtar kontrolü sunucu tarafında yapılır. Yerel geliştirmede SQLite geri dönüşü korunur.
 
@@ -113,7 +113,7 @@ Bu sürüm FastAPI tabanlı bir panel ve korumalı görev API'si içerir:
 NetCmd projesi/veritabanı kullanılmaz. Supabase Free projeleri 500 MB veritabanı kotası ve düşük aktivitede otomatik duraklatma sınırlamalarına tabidir.
 
 ## Dokümantasyon
-- [13 ajan işletim modeli](docs/AGENTS.md)
+- [14 ajan işletim modeli](docs/AGENTS.md)
 - [Mimari](docs/ARCHITECTURE.md)
 - [Güvenlik](docs/SECURITY.md)
 - [Yol haritası](docs/ROADMAP.md)

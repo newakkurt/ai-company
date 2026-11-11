@@ -36,7 +36,7 @@ The owner wants to monitor verified revenue and bank settlements, not manage dai
 - QA: automated tests, regression tests and release gates.
 - Security: threat modeling, secret handling, privacy and access control.
 - Memory: durable approved decisions, customer feedback and lessons.
-- CFO / Finance & Revenue Operations: proposed 14th role; must be added to the registry and tested before being described as active. Until then Data Analyst prepares read-only finance summaries and CEO reviews them.
+- CFO / Finance & Revenue Operations: registered 14th role with read-only finance-reporting responsibilities. The role can analyze only authorized, non-secret data; no billing-provider connector, bank access, payout, refund, transfer or spending tool is implemented. Until connectors and worker tests exist, it produces analysis only when explicitly assigned and supplied safe records.
 
 ## Permissions and safety boundaries
 ### May run autonomously once implemented

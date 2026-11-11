@@ -5,10 +5,10 @@ import app
 
 
 class CloudApiImportTests(unittest.TestCase):
-    def test_health_endpoint_reports_thirteen_agents(self):
+    def test_health_endpoint_reports_fourteen_agents(self):
         result = app.healthz()
         self.assertTrue(result["ok"])
-        self.assertEqual(result["agents"], 13)
+        self.assertEqual(result["agents"], 14)
 
     def test_provider_is_not_assumed_configured(self):
         # CI must not need an API key or a local Ollama instance.
@@ -23,7 +23,7 @@ class CloudApiImportTests(unittest.TestCase):
         }):
             result = app.readiness()
         self.assertTrue(result["ready"])
-        self.assertEqual(result["agents"], 13)
+        self.assertEqual(result["agents"], 14)
         self.assertEqual(result["database"]["backend"], "supabase")
         self.assertTrue(result["provider"]["gemini"])
         self.assertFalse(result["external_actions_enabled"])

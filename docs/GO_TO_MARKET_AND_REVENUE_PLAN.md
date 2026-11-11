@@ -90,7 +90,7 @@ Revenue target definition: USD 5,000/month in net collected revenue after platfo
 Other offers (USD 49/month Starter, USD 99/month Pro, USD 149+/month MSP, one-time guided audit USD 150–500) remain unvalidated hypotheses and must not be published as active offers. Before introducing further bundles, define supported vendors, device/site limits, report retention, support response, cancellation/refund terms and exclusions. Never promise unattended production changes.
 
 ## 5. Agent responsibilities
-Current registry has 13 roles:
+Current registry has 14 roles:
 - CEO: priorities, approvals, revenue target review.
 - Chief of Staff / PM: backlog, owners, dependencies and deadlines.
 - Research: customer/competitor evidence and source links.
@@ -104,7 +104,7 @@ Current registry has 13 roles:
 - Security: privacy, secrets, access and threat review.
 - Memory: approved decisions and lessons.
 
-Gap and decision: create a dedicated 14th role named CFO / Finance & Revenue Operations. This is the approved target design, but it is NOT active until the agent registry, permissions and worker tests are changed and verified. Until then, Data Analyst prepares read-only finance summaries and CEO reviews them. CFO permissions must be read-only for provider/billing metadata and reports; no secrets, bank credentials, payout changes, refunds, transfers or spending authority.
+CFO / Finance & Revenue Operations is now registered as role 14 and covered by registry tests. It is an analysis role only: no provider billing connector, bank access, payment reconciliation feed or settlement data integration is active yet. It may use only explicitly authorized, non-secret records. No secrets, bank credentials, payout changes, refunds, transfers or spending authority.
 
 ## 6. Operating cadence (after worker/scheduler is implemented)
 Daily:

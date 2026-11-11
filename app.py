@@ -1,4 +1,4 @@
-"""Cloud API and minimal dashboard for the 13-role AI Company."""
+"""Cloud API and minimal dashboard for the 14-role AI Company."""
 from __future__ import annotations
 
 import hmac
@@ -133,7 +133,7 @@ def task_detail(task_id: str):
 def create_task(payload: TaskInput):
     item = store.create_task(payload.description)
     store.assign_agents(item["task_id"], [agent.id for agent in load_agents()])
-    return {"task_id": item["task_id"], "status": "planned", "assigned_agents": 13}
+    return {"task_id": item["task_id"], "status": "planned", "assigned_agents": len(load_agents())}
 
 
 def _execute_analysis(task_id: str) -> None:
@@ -141,7 +141,7 @@ def _execute_analysis(task_id: str) -> None:
     state.update(status="queued", message="Waiting for the analysis worker.")
     _run_lock.acquire()
     try:
-        state.update(status="running", message="13 role agents are preparing analysis with Gemini 3.8 Flash.")
+        state.update(status="running", message="14 role agents are preparing analysis with Gemini 3.8 Flash.")
         results = run_task(task_id, store=store)
         state.update(status="completed", result_count=len(results), message="Analysis saved.")
     except Exception as exc:

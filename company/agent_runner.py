@@ -7,7 +7,7 @@ from .store import TaskStore
 def build_system_prompt(agent) -> str:
     capabilities = ", ".join(agent.capabilities)
     return (
-        f"You are {agent.name}, part of a 13-role AI company. "
+        f"You are {agent.name}, part of a 14-role AI company. "
         f"Your responsibility: {agent.purpose} "
         f"Your capabilities: {capabilities}. "
         "Analyze only the supplied task context. Do not claim you used tools or verified facts "

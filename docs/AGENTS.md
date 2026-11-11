@@ -1,6 +1,6 @@
-# 13-Agent Operating Model
+# 14-Agent Operating Model
 
-The registry in `config/agents.json` defines exactly 13 specialist roles. The current release implements an offline registry and transparent keyword-based routing. It does **not** claim that 13 independent LLM workers are already reasoning or executing in the background.
+The registry in `config/agents.json` defines exactly 14 specialist roles. The current release implements an offline registry and transparent keyword-based routing. It does **not** claim that 14 independent LLM workers are already reasoning or executing in the background.
 
 ## Roles
 
@@ -17,6 +17,7 @@ The registry in `config/agents.json` defines exactly 13 specialist roles. The cu
 11. Memory & Knowledge Curator — decisions, lessons, project knowledge.
 12. QA & Testing Engineer — acceptance criteria, test plans, regression, release review.
 13. Security & Compliance Officer — secrets, privacy, permissions, threat review.
+14. CFO / Finance & Revenue Operations — read-only revenue, subscription, fee, refund, churn and settlement reporting from authorized non-secret records; no banking credentials or financial actions.
 
 ## Current behavior
 
@@ -35,3 +36,4 @@ The registry in `config/agents.json` defines exactly 13 specialist roles. The cu
 4. Read-only project adapters.
 5. Branch/PR-only write adapter with per-action approval.
 6. Desktop/web control panel and monitoring.
+7. CFO role is registered and test-covered; provider billing connectors and persistent worker remain separate milestones.
