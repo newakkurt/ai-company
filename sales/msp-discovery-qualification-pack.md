@@ -22,7 +22,7 @@ Status: internal sales enablement draft; not sent to prospects.
 ## Pilot offer — draft only
 A bounded evaluation can cover one site and up to 10 devices using customer-supplied, sanitized evidence. Deliverables: inventory summary, evidence-backed findings, risk-ranked remediation checklist, and a review call. No credentials, direct device connection, configuration changes, or production deployment are included in this draft.
 
-The $69/month amount is a target hypothesis only. Do not represent it as an active subscription until the Buy Me a Coffee tier, signed webhook, entitlement mapping, cancellation lifecycle, and a real test payment are verified.
+The $69/month amount is a target hypothesis only; it is not an active subscription. Do not represent it as an active subscription until the Buy Me a Coffee tier, signed webhook, entitlement mapping, cancellation lifecycle, and a real test payment are verified.
 
 ## Prospect research — public business information only
 These are uncontacted prospects. Fit is inferred from the services each business publicly describes; no purchase intent is known.
