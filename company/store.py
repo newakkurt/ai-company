@@ -1,4 +1,4 @@
-"""Local SQLite task and audit store. No external services or command execution."""
+"""Local SQLite task, assignment, and audit store. No execution engine."""
 from datetime import datetime, timezone
 from pathlib import Path
 import json
@@ -8,8 +8,10 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "data" / "company.db"
 
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
 
 class TaskStore:
     def __init__(self, db_path: Path | str = DB_PATH):
@@ -44,8 +46,17 @@ class TaskStore:
                     details_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS assignments (
+                    assignment_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL REFERENCES tasks(task_id),
+                    agent_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'suggested',
+                    assigned_at TEXT NOT NULL,
+                    UNIQUE(task_id, agent_id)
+                );
                 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
                 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
+                CREATE INDEX IF NOT EXISTS idx_assignments_task ON assignments(task_id);
             """)
 
     def create_task(self, description: str) -> dict:
@@ -59,7 +70,7 @@ class TaskStore:
                 """INSERT INTO tasks
                 (task_id, description, status, owner, execution_mode,
                  approval_required, created_at, updated_at)
-                VALUES (?, ?, 'planned', 'ceo-orchestrator', 'dry_run', 1, ?, ?)""",
+                VALUES (?, ?, 'planned', 'ceo', 'dry_run', 1, ?, ?)""",
                 (task_id, description, now, now)
             )
             self._event(db, task_id, "task_created", "user", {"mode": "dry_run"})
@@ -74,6 +85,32 @@ class TaskStore:
              json.dumps(details, ensure_ascii=False), utc_now())
         )
 
+    def assign_agents(self, task_id: str, agent_ids: list[str]):
+        """Record suggested owners only; this does not launch agents."""
+        now = utc_now()
+        with self._connect() as db:
+            if db.execute("SELECT 1 FROM tasks WHERE task_id=?", (task_id,)).fetchone() is None:
+                raise KeyError(f"Task not found: {task_id}")
+            for agent_id in dict.fromkeys(agent_ids):
+                db.execute(
+                    """INSERT OR IGNORE INTO assignments
+                    (assignment_id, task_id, agent_id, status, assigned_at)
+                    VALUES (?, ?, ?, 'suggested', ?)""",
+                    (uuid.uuid4().hex, task_id, agent_id, now)
+                )
+            self._event(db, task_id, "agent_assignments_suggested", "ceo",
+                        {"agent_ids": list(dict.fromkeys(agent_ids)), "execution": "not_started"})
+            db.execute("UPDATE tasks SET updated_at=? WHERE task_id=?", (now, task_id))
+        return self.list_assignments(task_id)
+
+    def list_assignments(self, task_id: str):
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT agent_id, status, assigned_at FROM assignments WHERE task_id=? ORDER BY assigned_at, agent_id",
+                (task_id,)
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def get_task(self, task_id: str):
         with self._connect() as db:
             row = db.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
@@ -85,6 +122,12 @@ class TaskStore:
                 {**dict(e), "details": json.loads(e["details_json"])}
                 for e in db.execute(
                     "SELECT * FROM events WHERE task_id=? ORDER BY created_at",
+                    (task_id,)
+                ).fetchall()
+            ]
+            item["assignments"] = [
+                dict(a) for a in db.execute(
+                    "SELECT agent_id, status, assigned_at FROM assignments WHERE task_id=? ORDER BY assigned_at, agent_id",
                     (task_id,)
                 ).fetchall()
             ]
