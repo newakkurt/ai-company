@@ -100,9 +100,8 @@ def create_task(payload: TaskInput):
 
 def _execute_analysis(task_id: str) -> None:
     state = _run_state.setdefault(task_id, {})
-    if not _run_lock.acquire(blocking=False):
-        state.update(status="queued", message="Another analysis is running; retry this task shortly.")
-        return
+    state.update(status="queued", message="Waiting for the analysis worker.")
+    _run_lock.acquire()
     try:
         state.update(status="running", message="13 role agents are preparing analysis.")
         results = run_task(task_id)
