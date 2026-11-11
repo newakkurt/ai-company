@@ -41,11 +41,12 @@ def require_api_key(authorization: str | None = Header(default=None)) -> None:
 
 
 def provider_status() -> dict[str, Any]:
+    configured = bool(os.getenv("GEMINI_API_KEY"))
     return {
-        "gemini": bool(os.getenv("GEMINI_API_KEY")),
-        "ollama": bool(os.getenv("AI_COMPANY_OLLAMA_URL")),
-        "model": os.getenv("AI_COMPANY_GEMINI_MODEL", "gemini-2.5-flash"),
-        "ready": bool(os.getenv("GEMINI_API_KEY") or os.getenv("AI_COMPANY_OLLAMA_URL")),
+        "gemini": configured,
+        "ollama": False,
+        "model": os.getenv("AI_COMPANY_GEMINI_MODEL", "gemini-3.8-flash"),
+        "ready": configured,
     }
 
 
@@ -131,7 +132,7 @@ def _execute_analysis(task_id: str) -> None:
     state.update(status="queued", message="Waiting for the analysis worker.")
     _run_lock.acquire()
     try:
-        state.update(status="running", message="13 role agents are preparing analysis.")
+        state.update(status="running", message="13 role agents are preparing analysis with Gemini 3.8 Flash.")
         results = run_task(task_id, store=store)
         state.update(status="completed", result_count=len(results), message="Analysis saved.")
     except Exception as exc:  # noqa: BLE001 - report sanitized failure to the dashboard
@@ -148,7 +149,7 @@ def start_analysis(task_id: str, background: BackgroundTasks):
     if not provider_status()["ready"]:
         raise HTTPException(
             status_code=503,
-            detail="No cloud or local model is configured. Add GEMINI_API_KEY in Render environment variables.",
+            detail="Gemini 3.8 Flash is not configured. Add GEMINI_API_KEY in Render environment variables.",
         )
     current = _run_state.get(task_id, {}).get("status")
     if current == "running":
