@@ -46,7 +46,7 @@ def load_agents(path: Path | str = REGISTRY_PATH) -> list[Agent]:
 
 
 def route_task(description: str, agents: list[Agent] | None = None) -> list[str]:
-    """Return ordered agent IDs using transparent keyword scoring; never executes work."""
+    """Return every relevant specialist in score order; CEO coordinates each task."""
     text = re.sub(r"[^a-z0-9ğüşöçıİĞÜŞÖÇ]+", " ", description.casefold())
     words = set(text.split())
     agents = agents or load_agents()
@@ -58,8 +58,8 @@ def route_task(description: str, agents: list[Agent] | None = None) -> list[str]
         if score:
             scores[agent.id] = score
     ordered = sorted(scores, key=lambda key: (-scores[key], key))
-    # CEO coordinates every task; specialist roles are suggestions only.
-    return ["ceo", *ordered[:4]]
+    # Keep all relevant roles; do not silently truncate cross-functional tasks.
+    return ["ceo", *ordered]
 
 
 def agent_summary() -> list[dict]:
