@@ -29,7 +29,7 @@ class AgentRunnerTests(unittest.TestCase):
 
     def test_ceo_runs_last_and_receives_specialist_analysis(self):
         provider = Mock()
-        provider.generate.side_effect = ["Specialist result", "CEO summary"]
+        provider.generate.side_effect = lambda system, prompt: "CEO summary" if system.startswith("You are CEO") else "Specialist result"
         results = run_task(self.task["task_id"], store=self.store, provider=provider)
         self.assertEqual(results[-1]["agent_id"], "ceo")
         ceo_prompt = provider.generate.call_args_list[-1].args[1]
