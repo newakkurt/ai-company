@@ -54,17 +54,45 @@ class GeminiProvider:
                 break
             except HTTPError as exc:
                 status = int(exc.code)
-                if status in self.RETRYABLE_STATUS and attempt < 2:
-                    retry_after = exc.headers.get("Retry-After", "")
+                raw_error = exc.read(8192)
+                try:
+                    error_payload = json.loads(raw_error.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    error_payload = {}
+                error_data = error_payload.get("error") or {}
+                safe_message = str(error_data.get("message") or "")[:120]
+                quota_ids = []
+                for detail in error_data.get("details") or []:
+                    quota_failure = detail.get("quotaFailure") or {}
+                    for violation in quota_failure.get("violations") or []:
+                        quota_id = violation.get("quotaId") or violation.get("quotaMetric")
+                        if quota_id and quota_id not in quota_ids:
+                            quota_ids.append(str(quota_id)[:100])
+                retry_after = (exc.headers or {}).get("Retry-After", "")
+
+                # A 429 may be a per-minute or per-day quota. Do not burn more
+                # requests with blind retries; retry only when Google gives a hint.
+                if status == 429 and retry_after and attempt < 2:
                     try:
-                        delay = min(max(int(retry_after), 1), 30)
+                        delay = min(max(int(retry_after), 1), 900)
                     except (TypeError, ValueError):
-                        delay = self.RETRY_DELAYS[attempt]
+                        delay = 60
                     time.sleep(delay)
                     continue
-                raise GeminiAPIError(
-                    f"Gemini API returned HTTP {status}; check key access, model, and quota."
-                ) from exc
+                if status in {500, 502, 503, 504} and attempt < 2:
+                    time.sleep(self.RETRY_DELAYS[attempt])
+                    continue
+
+                summary = f"Gemini API returned HTTP {status}"
+                if quota_ids:
+                    summary += "; quota=" + ",".join(quota_ids)
+                if safe_message:
+                    summary += "; " + safe_message
+                if status == 429:
+                    summary += "; check Google AI Studio Usage and Rate Limits"
+                else:
+                    summary += "; check key access, model, and quota"
+                raise GeminiAPIError(summary) from exc
             except (URLError, TimeoutError) as exc:
                 if attempt < 2:
                     time.sleep(self.RETRY_DELAYS[attempt])
