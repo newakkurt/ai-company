@@ -68,18 +68,12 @@ class SupabaseTaskStore:
             raise ValueError("Task description cannot be empty")
         task_id = task_id or f"task-{uuid.uuid4().hex[:10]}"
         now = utc_now()
-        existing = self.get_task(task_id)
-        if existing:
-            return existing
         self._request("tasks", "POST", {"on_conflict": "task_id"}, {
             "task_id": task_id, "description": description, "status": "planned",
             "owner": "ceo", "execution_mode": "dry_run", "approval_required": True,
             "created_at": now, "updated_at": now,
         }, "resolution=ignore-duplicates,return=minimal")
-        item = self.get_task(task_id)
-        if not item:
-            raise RuntimeError("Task creation could not be confirmed")
-        self._event(task_id, "task_created", "system", {"mode": "dry_run"})
+        self._event(task_id, "task_created", "user", {"mode": "dry_run"})
         return self.get_task(task_id)
 
     def get_payment_event(self, event_id: str):
