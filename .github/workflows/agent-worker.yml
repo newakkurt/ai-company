@@ -1,8 +1,6 @@
 name: Continuous AI Agent Worker
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
