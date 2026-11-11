@@ -13,6 +13,7 @@ def main():
     approve.add_argument("task_id")
     approve.add_argument("--note", default="")
     sub.add_parser("telegram-poll", help="Receive allowlisted Telegram tasks")
+    sub.add_parser("telegram-id", help="Show chat IDs from pending bot updates")
     args = parser.parse_args()
 
     if args.command == "doctor":
@@ -37,6 +38,20 @@ def main():
             parser.error(str(exc))
         print(f"Approval recorded: {item['task_id']}")
         print("This records approval only; it does not run code, publish, deploy, spend, or change devices.")
+    elif args.command == "telegram-id":
+        from .telegram import TelegramIntake
+        try:
+            bot = TelegramIntake(allowed_chat_ids=["__discovery_only__"])
+            ids = bot.pending_chat_ids()
+        except (ValueError, RuntimeError) as exc:
+            parser.error(str(exc))
+        if ids:
+            print("Pending Telegram chat IDs (add only your own):")
+            for chat_id in ids:
+                print(chat_id)
+        else:
+            print("No pending messages. Send /start to your bot, then run this command again.")
+        print("Run this before telegram-poll; do not share your bot token.")
     elif args.command == "telegram-poll":
         from .telegram import TelegramIntake
         try:
