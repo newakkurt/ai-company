@@ -1,4 +1,4 @@
-"""Local SQLite task, assignment, agent-output, and audit store."""
+"""Local SQLite task, assignment, agent-output, knowledge, and audit store."""
 from datetime import datetime, timezone
 from pathlib import Path
 import json
@@ -48,10 +48,15 @@ class TaskStore:
                     output_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
                     agent_id TEXT NOT NULL, output_text TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS knowledge_notes (
+                    note_id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
+                    tags TEXT NOT NULL, created_at TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
                 CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
                 CREATE INDEX IF NOT EXISTS idx_assignments_task ON assignments(task_id);
                 CREATE INDEX IF NOT EXISTS idx_agent_outputs_task ON agent_outputs(task_id);
+                CREATE INDEX IF NOT EXISTS idx_knowledge_created ON knowledge_notes(created_at);
             """)
 
     def create_task(self, description: str) -> dict:
@@ -126,6 +131,35 @@ class TaskStore:
                 (task_id,)
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def remember(self, title: str, body: str, tags: list[str] | None = None):
+        title, body = title.strip(), body.strip()
+        if not title or not body:
+            raise ValueError("Knowledge title and body are required")
+        note_id = f"note-{uuid.uuid4().hex[:10]}"
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO knowledge_notes (note_id,title,body,tags,created_at) VALUES (?,?,?,?,?)",
+                (note_id, title, body, json.dumps(tags or [], ensure_ascii=False), utc_now())
+            )
+        return note_id
+
+    def search_knowledge(self, query: str = "", limit: int = 20):
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT note_id,title,body,tags,created_at FROM knowledge_notes ORDER BY created_at DESC"
+            ).fetchall()
+        terms = [term.casefold() for term in query.split() if term.strip()]
+        results = []
+        for row in rows:
+            item = dict(row)
+            item["tags"] = json.loads(item["tags"])
+            haystack = (item["title"] + " " + item["body"] + " " + " ".join(item["tags"])).casefold()
+            if all(term in haystack for term in terms):
+                results.append(item)
+            if len(results) >= limit:
+                break
+        return results
 
     def get_task(self, task_id: str):
         with self._connect() as db:
