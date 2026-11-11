@@ -12,6 +12,7 @@ def main():
     approve = sub.add_parser("approve", help="Record human approval; does not execute")
     approve.add_argument("task_id")
     approve.add_argument("--note", default="")
+    sub.add_parser("telegram-poll", help="Receive allowlisted Telegram tasks")
     args = parser.parse_args()
 
     if args.command == "doctor":
@@ -36,6 +37,17 @@ def main():
             parser.error(str(exc))
         print(f"Approval recorded: {item['task_id']}")
         print("This records approval only; it does not run code, publish, deploy, spend, or change devices.")
+    elif args.command == "telegram-poll":
+        from .telegram import TelegramIntake
+        try:
+            bot = TelegramIntake()
+        except ValueError as exc:
+            parser.error(str(exc))
+        print("Telegram intake active. Only allowlisted chat IDs can create tasks. Press Ctrl+C to stop.")
+        try:
+            bot.poll_forever()
+        except KeyboardInterrupt:
+            print("\nTelegram intake stopped.")
 
 if __name__ == "__main__":
     main()
