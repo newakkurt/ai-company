@@ -21,6 +21,9 @@ class FakeResponse:
 
 
 class GeminiProviderTests(unittest.TestCase):
+    def test_default_model_is_flash_lite_for_high_volume_worker(self):
+        self.assertEqual(GeminiProvider.DEFAULT_MODEL, "gemini-3.5-flash-lite")
+
     def test_api_key_is_sent_in_header_not_url(self):
         response = FakeResponse(
             b'{"candidates":[{"content":{"parts":[{"text":"OK"}]}}]}'
