@@ -117,3 +117,4 @@ NetCmd projesi/veritabanı kullanılmaz. Supabase Free projeleri 500 MB veritaba
 - [Mimari](docs/ARCHITECTURE.md)
 - [Güvenlik](docs/SECURITY.md)
 - [Yol haritası](docs/ROADMAP.md)
+- [Sahip delegasyonu ve otonom çalışma modeli](docs/OWNER_DELEGATION_AND_AUTONOMY.md)
