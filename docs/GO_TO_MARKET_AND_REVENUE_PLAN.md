@@ -1,134 +1,155 @@
 # AI Company — Go-to-Market & Revenue Operating Plan
-Status: Draft operating plan (not a live payment integration)
+Status: Operating reference; payment configuration inspected in NetCmd-Site. Live payment acceptance still requires end-to-end verification.
 
 ## 1. Business objective
-- Target: USD 5,000 monthly revenue.
+- Target: USD 5,000 monthly revenue (goal, not forecast or guarantee).
 - Initial cash budget: USD 0.
-- First commercial offer: Combined — self-serve network audit tooling plus optional expert implementation/support.
-- Primary product asset: NetCmd. AI Company is the internal planning, research, marketing, QA and reporting layer.
-- Protect existing repositories and services. AI Company may inspect them read-only; it must not modify NetCmd, NetControl, paylasim-botu or their databases without a separately scoped approval.
+- Initial offer: Combined — self-serve network audit tooling plus optional expert implementation/support.
+- Primary commercial product: NetCmd. AI Company coordinates research, marketing, QA and finance reporting.
+- Existing repositories and services are protected. AI Company may inspect NetCmd, NetControl and paylasim-botu read-only; no edits, deployments, database changes or customer-device changes without separate scoped owner approval.
 
-## 2. Initial customer segments
-1. Small and mid-sized businesses with 1–20 network switches and no dedicated network automation team.
-2. Managed service providers / system integrators managing multiple customer networks.
-3. IT/network administrators responsible for Huawei, Cisco and Aruba estates.
-4. Network consultants who need repeatable audit reports and command references.
+## 2. Customer segments and acquisition
+Target:
+1. SMBs with 1–20 switches and no dedicated network automation team.
+2. MSPs / system integrators managing multiple customer networks.
+3. Huawei, Cisco and Aruba network administrators.
+4. Network consultants needing repeatable audits and command references.
 
-Do not claim support for a vendor, feature or security control until QA verifies it.
+Acquisition channels:
+- LinkedIn: relevant IT/network decision-makers; individually researched, consent-aware outreach.
+- SEO: network audit, switch configuration audit, Huawei/Cisco/Aruba audit, unused-port review and network automation.
+- YouTube: synthetic-data product demonstrations and technical explainers.
+- Instagram: short verified demos and brand awareness.
+- GitHub/community: useful free examples and sample reports; no spam.
 
-## 3. Offers and pricing hypotheses
-These are experiments, not published commitments:
-- Free: public command library, sample reports and a limited sample audit workflow.
-- Network Audit Starter: test price USD 49/month.
-- Network Audit Pro: test price USD 99/month.
-- Multi-site / MSP: test price USD 149/month and upward only after validating usage and support costs.
-- One-time guided audit / implementation: test range USD 150–500, scoped per engagement.
+Funnel: discovery/content → NetCmd landing page → safe demo/sample report → pilot or plan → clear scope/terms → verified payment → entitlement/onboarding → support/renewal.
 
-Before publishing prices, define limits, supported vendors, number of devices/sites, report retention, support response, cancellation/refund terms and what is explicitly excluded. Never promise unattended production changes in the initial offer.
+Track source, campaign, consent, qualified lead, demo, proposal, payment state, activation, churn and support effort. Do not collect unnecessary personal data.
 
-## 4. Customer acquisition funnel
-Discovery:
-- LinkedIn: useful technical posts and direct, individually researched outreach to relevant IT/network decision-makers.
-- SEO: focused pages for network audit, switch configuration audit, Huawei/Cisco/Aruba audit, unused-port review and network automation.
-- YouTube: short demonstrations using synthetic/sample configurations; never expose customer configs or secrets.
-- Existing social channels: repurpose verified demos to Instagram and YouTube; prioritize LinkedIn for B2B.
-- GitHub/community: publish genuinely useful free examples and sample reports; no spam.
+## 3. NetCmd payment setup — EXISTING CONFIGURATION FOUND
+Source repository: https://github.com/newakkurt/NetCmd-Site
+Source README: https://github.com/newakkurt/NetCmd-Site/blob/main/README.md
+Public payment page configured in data/site.json: https://buymeacoffee.com/sevketkaynar
 
-Conversion:
-1. Visitor lands on a focused NetCmd page.
-2. Visitor sees supported-vendor scope, screenshots/sample output and clear limitations.
-3. Visitor runs a safe sample/demo with synthetic data.
-4. Visitor requests a pilot or selects a plan.
-5. Customer receives a written scope, terms and invoice/payment instructions.
-6. Payment is confirmed by provider/webhook or manually reconciled before access is granted.
-7. Onboarding, first report, support and renewal reminders follow.
+### A. Buy Me a Coffee — NetCmd PRO
+- Existing public BMC page is configured as the support / membership destination.
+- NetCmd README specifies a NetCmd PRO recurring membership at USD 22/month.
+- Customer must use the same email address for Buy Me a Coffee and their NetCmd account; the signed webhook maps supporter email to auth.users.
+- Only the configured PRO membership level grants Premium. One-time coffee donations do NOT grant Premium.
+- Expected webhook events: membership.started, membership.updated, membership.cancelled, membership.paused.
+- Webhook signature header: x-signature-sha256; HMAC-SHA256 verification is implemented in supabase/functions/bmc-webhook.
+- Required Supabase Edge Function secrets are named BMC_WEBHOOK_SECRET and BMC_PRO_MEMBERSHIP_LEVEL_ID. Supabase standard SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are used by the function.
+- Webhook endpoint configured in NetCmd README: https://olbyrzqjdbxxsfaonsew.supabase.co/functions/v1/bmc-webhook
+- Database migration: supabase/bmc_membership.sql. It uses event IDs for idempotency and only grants access for the configured membership-level ID.
+- Deployment, live-mode event delivery, BMC membership-level ID and real payout settlement must be independently verified before describing the BMC path as fully live.
+- Do not invent the BMC creator payout bank account or payout schedule. Those are private creator-dashboard settings and are not in the public repo.
+- BMC platform and payment-processing fees must be included in net revenue reconciliation; verify current fee rates in the creator dashboard/provider terms rather than assuming a fixed rate.
 
-Track source, campaign, landing page, lead consent, qualification, demo, proposal, payment status, activation, churn reason and support effort. Do not collect unnecessary personal data.
+### B. IBAN / bank transfer — SEMI-AUTOMATED ORDER FLOW EXISTS IN CODE
+NetCmd README and supabase/iban_orders.sql describe:
+1. Authenticated customer creates a 30-day or 365-day Premium order and receives an order code (NC-XXXXXX).
+2. Customer transfers to the bank account displayed by NetCmd and puts the order code in the transfer description.
+3. Customer clicks “Ödedim” / reports payment.
+4. The system creates a pending premium request and sends an administrator notification to Telegram.
+5. Human administrator checks the actual bank transaction and explicitly approves or rejects.
+6. Approval enables Premium and marks the matching order paid; rejection marks it rejected.
+- This is NOT automatic bank reconciliation. A customer pressing “Ödedim” is not proof of payment.
+- Relevant migration: supabase/iban_orders.sql (README says run community.sql, ops2.sql, iban_orders.sql, waitlist.sql in that order).
+- Render environment variable names used for the displayed bank details: BANK_IBAN (required), BANK_HOLDER (required), BANK_NAME (optional). Actual values are intentionally not in Git and must never be copied into AI prompts, source control, logs or agent memory.
+- Display amount config: data/site.json uses premium_price_try; current public config has it blank. Therefore a fixed TRY amount is not currently recorded in that public config.
+- Never infer or reveal the destination IBAN from the source repository. It must be managed only in the protected Render environment and verified by the owner.
+- Admin approval remains a human control. Agents may reconcile read-only exports if explicitly provided, but cannot approve, reject, transfer or change payout details.
 
-## 5. Payment and settlement — NOT CONFIGURED
-No destination IBAN or payment provider is currently confirmed in this repository. Do not invent or hardcode an IBAN.
-Required before accepting money:
-- Confirm the legal seller / invoicing entity and country.
-- Select a payment provider that supports that seller, the desired currencies, subscriptions and international cards.
-- Complete provider KYC and business verification.
-- Add the seller's verified bank account in the provider dashboard. Provider settlement goes to that bank account under its payout schedule and fees; the provider, not an AI agent, handles card data.
-- Configure signed webhook verification, idempotency, payment/refund/dispute states and reconciliation.
-- Grant product access only after a verified paid event or an explicitly recorded manual payment check.
-- Keep tax, invoicing, consumer rights, privacy and refund requirements under qualified local review.
+### C. Public seller and legal configuration gaps
+- data/site.json has a seller display name, but address, tax office, tax number and phone are blank.
+- contact_email is blank.
+- premium_price_try is blank.
+- Before public commercial scaling, owner must complete and verify seller/invoicing details, contact channel, local tax/accounting obligations, distance-sales and refund terms, privacy notice and support policy with qualified local advice.
+- Do not claim legal or tax compliance from the presence of draft pages.
 
-CFO/finance workflow:
-- Record gross payment, currency, provider fee, refund/chargeback, net settlement, payout date and invoice reference.
-- Reconcile provider transactions against bank settlements.
-- Produce daily exceptions and monthly profit/loss and cash-flow summaries.
-- Never initiate transfers, change payout bank details, issue refunds or spend money without the owner's explicit approval.
-- Never put IBANs, bank credentials, API secrets or customer payment data in prompts, Git, logs or agent memory.
+### D. Payment security and CFO reconciliation
+- Keep bank account values, webhook secrets, service-role keys and payment credentials only in their intended protected provider/Render/Supabase secret stores.
+- Never read, export, repeat, store or transmit secret values to AI Company agents. Share only safe metadata: provider, product, currency, amount, billing interval, event types, statuses, timestamps and masked references.
+- Reconcile BMC gross receipts, fees, refunds, cancellations and net payouts against actual provider settlement records.
+- Reconcile bank-transfer orders against the actual bank statement; only owner/admin confirmation changes an order to paid.
+- Separate revenue earned, payment reported, payment confirmed, provider payout pending and bank settlement received.
+- CFO must never initiate transfers, change payout bank details, issue refunds or spend money without explicit owner approval.
 
-## 6. Agent responsibilities
-Current 13-role registry:
-- CEO: weekly priorities, approval queue and revenue target review.
+## 4. Pricing and product packaging
+Existing NetCmd price found:
+- NetCmd PRO: USD 22/month via BMC membership configuration.
+
+Other offers (USD 49/month Starter, USD 99/month Pro, USD 149+/month MSP, one-time guided audit USD 150–500) are only unvalidated hypotheses from the earlier business plan. They are NOT current NetCmd checkout prices and must not be published as active offers without owner approval and product/terms verification.
+
+Before introducing combined bundles, define supported vendors, device/site limits, report retention, support response, cancellation/refund terms and exclusions. Never promise unattended production changes.
+
+## 5. Agent responsibilities
+Current registry has 13 roles:
+- CEO: priorities, approvals, revenue target review.
 - Chief of Staff / PM: backlog, owners, dependencies and deadlines.
 - Research: customer/competitor evidence and source links.
-- Product & Business: offer design, packaging, customer interviews and pricing experiments.
-- Marketing & Growth: SEO, acquisition experiments and funnel metrics.
-- Content: publish-ready technical content, localization and demo scripts.
-- Software / Architect: propose isolated implementation plans and review interfaces.
-- Network Engineer: technical accuracy and supported-vendor scope.
-- Data Analyst: funnel, conversion, MRR, churn and cohort reporting.
+- Product & Business: packaging, interviews and pricing experiments.
+- Marketing & Growth: SEO and acquisition experiments.
+- Content: technical content, localization and demos.
+- Software / Architect: isolated implementation plans and interface review.
+- Network Engineer: technical accuracy and vendor scope.
+- Data Analyst: funnel, MRR, churn, fee and cash-flow reporting.
 - QA: test evidence and release gates.
 - Security: privacy, secrets, access and threat review.
-- Memory: approved decisions and experiment outcomes.
+- Memory: approved decisions and lessons.
 
-Gap: there is no dedicated CFO/Finance Agent in the current 13-role registry. A 14th Finance & Revenue Operations role is recommended, but is not yet implemented. Until then, assign finance analysis to Data Analyst with CEO review; do not claim an independent CFO is active.
+Gap: current 13-role registry has no independent CFO / Finance & Revenue Operations agent. A 14th role is recommended but is NOT yet implemented. Until then, Data Analyst prepares read-only finance summaries and CEO reviews them. Do not claim an independent CFO is active.
 
-## 7. Operating cadence (target once worker is implemented)
+## 6. Operating cadence (after worker/scheduler is implemented)
 Daily:
-- Research: collect qualified prospect and search-intent evidence.
-- Marketing: propose one measurable acquisition experiment.
-- Content: prepare one useful technical post or demo asset for human review.
-- Data: update funnel and revenue metrics from connected, authorized sources.
-- QA/Security: review any proposed public claim or release.
+- Research: qualified prospect and search-intent evidence.
+- Marketing: one measurable acquisition experiment proposal.
+- Content: one technical post/demo draft for human review.
+- Data: authorized funnel and revenue snapshot.
+- QA/Security: review public claims and release proposals.
 
 Weekly:
-- CEO selects experiments based on evidence.
+- CEO chooses evidence-based experiments.
 - PM tracks deliverables and blockers.
 - Product reviews customer feedback and pilot outcomes.
-- CFO role (when implemented) reconciles payments and cash flow.
+- Finance reporting reconciles provider and bank records with owner-controlled approval.
 
-No unsolicited bulk messaging, spam, scraping behind logins, fabricated testimonials, unverified claims or autonomous financial transactions.
+No unsolicited bulk messaging, spam, login-protected scraping, fabricated testimonials or unverified claims.
 
-## 8. Current implementation gaps
-P0 — blockers:
-- Confirm seller/legal entity and country-specific ability to sell and invoice.
-- Choose a supported payment provider and verify its payout/settlement support for the seller.
-- Add verified payout bank account in provider dashboard; IBAN intentionally absent from Git.
-- Implement checkout/payment status, signed webhooks, idempotency, refunds and access entitlements.
-- Confirm Gemini provider readiness and run a real multi-agent end-to-end test.
-- Implement a persistent background worker and scheduler. A web panel alone does not make agents autonomous.
-- Add agent task leases, retry/backoff, concurrency limits, budget/token limits, dead-letter handling and durable logs.
+## 7. Implementation gaps
+P0:
+- Verify the BMC membership tier, webhook deployment, secrets presence (without exposing values), test event and real paid/cancelled lifecycle.
+- Verify Render BANK_IBAN/BANK_HOLDER/BANK_NAME are configured and that the displayed details match the owner's intended receiving account; never export their values.
+- Set and verify premium_price_try if a fixed TRY amount is intended.
+- Complete seller address/tax/phone/contact fields and legal/accounting review.
+- Test the IBAN order → Telegram notification → human approval/rejection → Premium entitlement path end-to-end.
+- Confirm Gemini provider readiness and real multi-agent end-to-end run.
+- Implement persistent background worker/scheduler; a web panel alone does not make agents autonomous.
+- Add task leases, retries/backoff, concurrency limits, usage limits, dead-letter handling and durable logs.
 
-P1 — revenue readiness:
-- Publish product scope, plans, terms, privacy, cancellation/refund and support pages.
-- Create a lead/CRM pipeline and consent-aware contact process.
-- Instrument analytics for visitor → lead → demo → paid → retained.
-- Produce verified sample audit reports and onboarding docs.
-- Run 5–10 customer discovery interviews and 2–3 supervised pilots before scaling.
+P1:
+- Publish verified product scope, plan limits, terms, privacy, cancellation/refund and support pages.
+- Create consent-aware CRM pipeline and lead capture.
+- Measure visitor → lead → demo → paid → retained.
+- Produce verified sample reports and onboarding docs.
+- Run 5–10 customer discovery interviews and 2–3 supervised pilots.
 
-P2 — scale:
-- Add customer workspace, billing portal, usage metering and tenant isolation.
-- Add monthly reporting, renewal/churn analysis and referral program.
-- Add finance role only with scoped access and owner approval gates.
+P2:
+- Customer workspaces, billing portal, usage metering and tenant isolation.
+- Renewal/churn analysis and referral program.
+- Dedicated Finance & Revenue Operations agent with read-only finance access and owner approval gates.
 
-## 9. Safety and autonomy boundaries
-Autonomous agents may research public information, draft content, analyze approved metrics and create internal tasks. Human approval is required before sending outreach, publishing content, changing production code, deploying, changing customer configuration, issuing refunds, transferring funds, changing payout details or incurring paid costs.
+## 8. Safety and autonomy boundaries
+Agents may research public information, draft content, analyze authorized metrics and create internal tasks. Human approval is mandatory before outreach is sent, content is published, production code is changed, a deployment is made, customer network configuration is changed, a refund is issued, money is transferred, payout details are changed or paid costs are incurred.
 
-## 10. Success metrics
-- Qualified leads / week
+## 9. Success metrics
+- Qualified leads/week
 - Demo-to-paid conversion
-- New paying customers / month
-- Monthly recurring revenue (MRR)
-- One-time service revenue
+- New paying customers/month
+- MRR and one-time service revenue
 - Gross margin after provider/API/support costs
-- Activation time and first-value completion
-- Churn, refunds and support hours per customer
+- Refunds, disputes and churn
+- Activation time and support hours/customer
+- BMC net payouts and bank-transfer settlements reconciled separately
 
-The USD 5,000 target is a goal, not a forecast or guarantee. Report actual collected and settled revenue separately from pipeline, proposals and unpaid invoices.
+The USD 5,000 monthly target is a goal, not a forecast. Report pipeline, customer-reported payment, verified payment, provider payout and bank settlement as distinct states.
