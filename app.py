@@ -67,7 +67,7 @@ def status():
         "provider": provider_status(),
         "mode": "analysis_only",
         "external_actions_enabled": False,
-        "database": "sqlite_ephemeral_unless_external_volume_configured",
+        "database": "supabase" if all(os.getenv(k) for k in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY")) else "sqlite_ephemeral",
     }
 
 
