@@ -35,6 +35,18 @@ class AgentRunnerTests(unittest.TestCase):
         ceo_prompt = provider.generate.call_args_list[-1].args[1]
         self.assertIn("Specialist result", ceo_prompt)
 
+
+    def test_all_13_roles_can_run_and_ceo_synthesizes_last(self):
+        from company.agents import load_agents
+        agent_ids = [agent.id for agent in load_agents()]
+        self.store.assign_agents(self.task["task_id"], agent_ids)
+        provider = Mock()
+        provider.generate.return_value = "Role analysis."
+        results = run_task(self.task["task_id"], store=self.store, provider=provider)
+        self.assertEqual(len(results), 13)
+        self.assertEqual(results[-1]["agent_id"], "ceo")
+        self.assertEqual(len(self.store.get_task(self.task["task_id"])["agent_outputs"]), 13)
+
     def test_runner_rejects_unknown_task(self):
         with self.assertRaises(KeyError):
             run_task("missing-task", store=self.store, provider=Mock())
