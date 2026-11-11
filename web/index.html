@@ -24,9 +24,9 @@
 </head>
 <body>
 <main>
-  <div class="top"><div><h1>AI Company</h1><div class="sub">13 uzman rol · CEO orkestrasyonu · insan onaylı analiz</div></div><div class="row"><span id="health" class="muted">Bağlantı kontrol ediliyor…</span><button class="secondary" id="refresh">Yenile</button></div></div>
+  <div class="top"><div><h1>AI Company</h1><div class="sub">14 uzman rol · CEO orkestrasyonu · insan onaylı analiz</div></div><div class="row"><span id="health" class="muted">Bağlantı kontrol ediliyor…</span><button class="secondary" id="refresh">Yenile</button></div></div>
   <div class="grid">
-    <section class="panel"><div class="metric">13</div><div class="muted">Tanımlı uzman ajan</div></section>
+    <section class="panel"><div class="metric">14</div><div class="muted">Tanımlı uzman ajan</div></section>
     <section class="panel"><div class="metric">DRY-RUN</div><div class="muted">Dış işlem ve otomatik yayın kapalı</div></section>
     <section class="panel"><div class="metric" id="provider">—</div><div class="muted">Model sağlayıcısı</div></section>
     <section class="panel"><div class="metric" id="database">—</div><div class="muted">Kalıcı veritabanı</div></section>
@@ -40,7 +40,7 @@
     <h2>Yeni görev</h2>
     <label for="description">Görev açıklaması</label>
     <textarea id="description" placeholder="Örn. NetControl projesi için güvenli dağıtım planı hazırla."></textarea>
-    <div class="row" style="margin-top:10px"><button id="create">13 ajana ata</button><span id="message" class="muted"></span></div>
+    <div class="row" style="margin-top:10px"><button id="create">14 ajana ata</button><span id="message" class="muted"></span></div>
   </section>
   <section class="panel" style="margin-top:14px">
     <div class="top"><h2>Görevler</h2><span class="muted">Son 50 görev</span></div>
@@ -58,7 +58,7 @@ async function refresh(){try{const h=await fetch("/readyz").then(r=>r.json());$(
 async function loadTasks(){const d=await api("/api/tasks");$("#tasks").innerHTML=d.tasks.length?d.tasks.map(t=>'<div class="task"><div class="top"><strong>'+esc(t.description)+'</strong><span class="status">'+esc(t.status)+'</span></div><div class="muted">'+esc(t.task_id)+' · '+esc(t.created_at)+' · '+(t.approval_required?"İnsan onayı gerekli":"Onay gerekmiyor")+'</div><div class="row" style="margin-top:8px"><button class="secondary" data-run="'+esc(t.task_id)+'">Analizi başlat</button><button class="secondary" data-detail="'+esc(t.task_id)+'">Detay</button></div><div id="detail-'+esc(t.task_id)+'"></div></div>').join(""):"Henüz görev yok."}
 $("#tasks").addEventListener("click",async e=>{const id=e.target.dataset.run||e.target.dataset.detail;if(!id)return;try{if(e.target.dataset.run){await api("/api/tasks/"+encodeURIComponent(id)+"/run",{method:"POST"});$("#message").textContent="Analiz kuyruğa alındı."}else{const d=await api("/api/tasks/"+encodeURIComponent(id));$("#detail-"+id).innerHTML="<pre>"+esc(JSON.stringify({assignments:d.assignments,outputs:d.agent_outputs,run_state:d.run_state},null,2))+"</pre>"}await loadTasks()}catch(err){$("#message").textContent=err.message}});
 $("#saveKey").onclick=async()=>{apiKey=$("#key").value.trim();sessionStorage.setItem("ai_company_key",apiKey);await refresh()};
-$("#create").onclick=async()=>{try{const description=$("#description").value.trim();const d=await api("/api/tasks",{method:"POST",body:JSON.stringify({description})});$("#message").textContent="Görev oluşturuldu: "+d.task_id+" (13 rol atandı)";$("#description").value="";await loadTasks()}catch(e){$("#message").textContent=e.message}};
+$("#create").onclick=async()=>{try{const description=$("#description").value.trim();const d=await api("/api/tasks",{method:"POST",body:JSON.stringify({description})});$("#message").textContent="Görev oluşturuldu: "+d.task_id+" (14 rol atandı)";$("#description").value="";await loadTasks()}catch(e){$("#message").textContent=e.message}};
 $("#refresh").onclick=refresh;refresh();
 </script>
 </body>
