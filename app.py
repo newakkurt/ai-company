@@ -98,7 +98,7 @@ def readiness():
     }
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def storefront():
     return FileResponse(WEB_DIR / "sales.html")
 
