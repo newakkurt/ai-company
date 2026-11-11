@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "web"
 DB_PATH = Path(os.getenv("AI_COMPANY_DB_PATH", "/tmp/ai-company/company.db"))
 store = TaskStore(DB_PATH)
-app = FastAPI(title="New Akkurt AI Company", version="0.2.0")
+app = FastAPI(title="New Akkurt AI Company", version="0.2.1")
 app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
 
 _run_lock = threading.Lock()
@@ -51,14 +51,25 @@ def provider_status() -> dict[str, Any]:
 
 
 def database_status() -> dict[str, Any]:
-    backend = "supabase" if all(
-        os.getenv(k) for k in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY")
-    ) else "sqlite_ephemeral"
+    required = ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY")
+    configured = {key: bool(os.getenv(key)) for key in required}
+    backend = "supabase" if all(configured.values()) else "sqlite_ephemeral"
     try:
         store.list_tasks(limit=1)
-        return {"backend": backend, "connected": True, "error": None}
-    except Exception as exc:  # noqa: BLE001 - expose only a safe error class
-        return {"backend": backend, "connected": False, "error": type(exc).__name__}
+        return {"backend": backend, "connected": True, "configured": configured, "error": None}
+    except Exception as exc:  # expose safe diagnostic text, never credentials
+        message = str(exc)
+        safe_message = message[:240] if message else type(exc).__name__
+        for key in required + ("GEMINI_API_KEY",):
+            secret = os.getenv(key, "")
+            if secret:
+                safe_message = safe_message.replace(secret, "[redacted]")
+        return {
+            "backend": backend,
+            "connected": False,
+            "configured": configured,
+            "error": safe_message,
+        }
 
 
 @app.get("/healthz")
@@ -68,7 +79,6 @@ def healthz():
 
 @app.get("/readyz")
 def readiness():
-    """Public, non-secret readiness diagnostics for the hosted dashboard."""
     provider = provider_status()
     database = database_status()
     return {
@@ -122,7 +132,6 @@ def task_detail(task_id: str):
 @app.post("/api/tasks", dependencies=[Depends(require_api_key)])
 def create_task(payload: TaskInput):
     item = store.create_task(payload.description)
-    # Assign every registered role. Assignment is not execution.
     store.assign_agents(item["task_id"], [agent.id for agent in load_agents()])
     return {"task_id": item["task_id"], "status": "planned", "assigned_agents": 13}
 
@@ -135,7 +144,7 @@ def _execute_analysis(task_id: str) -> None:
         state.update(status="running", message="13 role agents are preparing analysis with Gemini 3.8 Flash.")
         results = run_task(task_id, store=store)
         state.update(status="completed", result_count=len(results), message="Analysis saved.")
-    except Exception as exc:  # noqa: BLE001 - report sanitized failure to the dashboard
+    except Exception as exc:
         state.update(status="failed", message=f"Analysis failed: {type(exc).__name__}")
     finally:
         _run_lock.release()
@@ -147,10 +156,7 @@ def start_analysis(task_id: str, background: BackgroundTasks):
     if item is None:
         raise HTTPException(status_code=404, detail="Task not found")
     if not provider_status()["ready"]:
-        raise HTTPException(
-            status_code=503,
-            detail="Gemini 3.8 Flash is not configured. Add GEMINI_API_KEY in Render environment variables.",
-        )
+        raise HTTPException(status_code=503, detail="Gemini 3.8 Flash is not configured.")
     current = _run_state.get(task_id, {}).get("status")
     if current == "running":
         return {"task_id": task_id, "status": "running"}
