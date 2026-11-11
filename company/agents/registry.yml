@@ -1,0 +1,22 @@
+agents:
+  - id: ceo-orchestrator
+    role: Break requests into bounded tasks, assign owners, consolidate outcomes.
+    tools: [local_task_store]
+  - id: technology
+    role: Analyze NetControl, NetOps, NetCmd and network automation work.
+    tools: [read_project_docs, propose_changes]
+  - id: software-engineer
+    role: Draft implementation plans, code changes and tests.
+    tools: [read_repository, propose_patch]
+  - id: research
+    role: Research sources and documentation; cite evidence.
+    tools: [web_research]
+  - id: marketing
+    role: Prepare YouTube, LinkedIn and X content packages; never publish autonomously.
+    tools: [draft_content]
+  - id: archivist
+    role: Maintain decisions, project notes and reusable knowledge.
+    tools: [read_write_company_vault]
+  - id: qa-security
+    role: Review evidence, tests, secrets exposure and permission boundaries.
+    tools: [read_only_review]
