@@ -20,6 +20,8 @@ class CloudApiImportTests(unittest.TestCase):
             "backend": "supabase", "connected": True, "error": None
         }), patch("app.provider_status", return_value={
             "gemini": True, "ollama": False, "model": "gemini-2.5-flash", "ready": True
+        }), patch("app.worker_status", return_value={
+            "enabled": True, "running": True, "mode": "embedded_supabase_poll", "poll_seconds": 15
         }):
             result = app.readiness()
         self.assertTrue(result["ready"])
@@ -27,12 +29,26 @@ class CloudApiImportTests(unittest.TestCase):
         self.assertEqual(result["database"]["backend"], "supabase")
         self.assertTrue(result["provider"]["gemini"])
         self.assertFalse(result["external_actions_enabled"])
+        self.assertTrue(result["worker"]["running"])
+
+    def test_readiness_is_not_ready_when_worker_enabled_but_stopped(self):
+        with patch("app.database_status", return_value={
+            "backend": "supabase", "connected": True, "error": None
+        }), patch("app.provider_status", return_value={
+            "gemini": True, "ollama": False, "model": "gemini-3.8-flash", "ready": True
+        }), patch("app.worker_status", return_value={
+            "enabled": True, "running": False, "mode": "embedded_supabase_poll", "poll_seconds": 15
+        }):
+            result = app.readiness()
+        self.assertFalse(result["ready"])
 
     def test_readiness_is_not_ready_without_model(self):
         with patch("app.database_status", return_value={
             "backend": "supabase", "connected": True, "error": None
         }), patch("app.provider_status", return_value={
             "gemini": False, "ollama": False, "model": "gemini-2.5-flash", "ready": False
+        }), patch("app.worker_status", return_value={
+            "enabled": True, "running": True, "mode": "embedded_supabase_poll", "poll_seconds": 15
         }):
             result = app.readiness()
         self.assertFalse(result["ready"])
