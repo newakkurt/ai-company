@@ -61,13 +61,27 @@ def dashboard():
 
 @app.get("/api/status", dependencies=[Depends(require_api_key)])
 def status():
+    database_backend = "supabase" if all(
+        os.getenv(k) for k in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY")
+    ) else "sqlite_ephemeral"
+    database_connected = False
+    database_error = None
+    try:
+        store.list_tasks(limit=1)
+        database_connected = True
+    except Exception as exc:  # noqa: BLE001 - return a safe diagnostic, not credentials
+        database_error = type(exc).__name__
     return {
         "service": "New Akkurt AI Company",
         "agents": len(load_agents()),
         "provider": provider_status(),
         "mode": "analysis_only",
         "external_actions_enabled": False,
-        "database": "supabase" if all(os.getenv(k) for k in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY")) else "sqlite_ephemeral",
+        "database": {
+            "backend": database_backend,
+            "connected": database_connected,
+            "error": database_error,
+        },
     }
 
 
