@@ -1,28 +1,40 @@
-# Architecture v0.1
+# Architecture v1.0
 
 ## Components
-- Intake: CLI first; Telegram adapter later.
-- Orchestrator: validates scope, creates task, routes to agents.
-- Agent registry: role descriptions and capability boundaries.
-- Task store: JSON files for local prototype; SQLite later if needed.
-- Knowledge vault: Markdown / Obsidian-compatible company memory.
-- Approval gate: explicit human approval for external or destructive actions.
-- QA: evidence, tests, policy review and final report.
-- Adapters: GitHub, Telegram and optional model providers; disabled until configured.
+- Intake: Windows/Linux CLI and optional Telegram long polling.
+- CEO orchestrator: creates task records and routes work to relevant roles.
+- Agent registry: 13 role definitions, purposes, capabilities, and tool boundaries in `config/agents.json`.
+- Router: transparent keyword scoring; CEO is always included, up to four specialists are suggested.
+- Agent runner: sends role-specific prompts to an optional local Ollama model; outputs are suggestions only.
+- Task store: SQLite tasks, suggested assignments, agent outputs, knowledge notes, and audit events.
+- Knowledge memory: local `remember` / `recall` functions.
+- Approval record: stores a human decision but never executes the task.
+- Telegram intake: allowlisted task creation only.
+- Future adapters: isolated read-only integrations first; write adapters disabled until separately approved.
+
+## 13 roles
+CEO / Orchestrator; Chief of Staff / Project Manager; Technology Architect; Software Engineer; Network & Infrastructure Engineer; Research & Intelligence Analyst; Marketing & Growth Lead; Content & Communications Editor; Product & Business Analyst; Data & Analytics Analyst; Memory & Knowledge Curator; QA & Testing Engineer; Security & Compliance Officer.
 
 ## Task lifecycle
-received -> planned -> assigned -> working -> qa -> approval_required -> completed
+received -> planned -> suggested_assignments -> analysis_only -> qa_review -> approval_required -> approved_for_next_step
 
-Alternative terminal states: rejected, blocked, failed.
+Alternative states: rejected, blocked, failed. Approval does not itself move a task into execution.
+
+## Model behavior
+All role prompts are sent to the configured local Ollama model. The model has no tools, shell, repository write access, or network-device access. Outputs must separate facts, assumptions, risks, recommendations, and evidence gaps. Model output is untrusted until reviewed by a human.
 
 ## Project isolation
-Each existing project remains in its own repository and deployment. This company stores project metadata and task references. Source code is not copied by default.
+NetControl, NetOps, NetCmd, social bots, English Telegram bot, and network automation remain separate repositories and deployments. This company stores references and task metadata only. No project source is copied or modified by default.
 
-## Milestones
-1. Scaffold and local task records.
-2. Human approval queue and audit log.
-3. Agent prompt packs and knowledge vault.
-4. GitHub read-only adapter.
-5. Telegram intake.
-6. Configurable LLM adapter with free/local-first options.
-7. Controlled write actions via branch + PR, never direct production mutation.
+## Safety
+- Dry-run is the default.
+- Telegram accepts only configured numeric chat IDs.
+- Secrets are stored only in local environment variables / `.env`.
+- No autonomous shell execution, publishing, deployment, spending, deletion, Git writes, or device changes.
+- Any future external write requires a narrowly scoped, explicit human approval and an auditable diff.
+
+## Current limitations
+- The 13 roles are a coordinated role framework, not 13 separately hosted model instances.
+- Routing is keyword-based, not semantic classification.
+- Ollama must be installed and a local model downloaded before `run` can work.
+- GitHub, project, and deployment adapters are not implemented yet.

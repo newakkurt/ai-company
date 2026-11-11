@@ -1,38 +1,95 @@
 # New Akkurt AI Company
 
-Bağımsız, modüler ve insan-onaylı AI şirketi orkestrasyon çatısı.
+Bağımsız, modüler, 13 rol ajanlı ve insan-onaylı AI şirketi orkestrasyon çatısı.
 
-## Hedef
-- Görevleri merkezi orkestratörden ekip ajanlarına dağıtmak.
-- Her iş için kanıt, çıktı, test ve karar kaydı üretmek.
-- Mevcut projeleri değiştirmeden adapter arayüzleriyle yönetmek.
-- İlk sürümde güvenli, yerel ve düşük maliyetli çalışmak.
+## Neler var?
+- 13 uzman rol: CEO, proje yönetimi, teknoloji mimarisi, yazılım, network/altyapı, araştırma, pazarlama, içerik, ürün/iş, veri, hafıza, QA ve güvenlik.
+- SQLite görev, ajan ataması, analiz çıktısı ve denetim kaydı.
+- Yerel bilgi hafızası: `remember` / `recall`.
+- Şeffaf anahtar-kelime yönlendirmesi ve isteğe bağlı yerel Ollama modeli.
+- İsteğe bağlı, izin listeli Telegram görev alımı.
 
-## İlkeler
-1. Varsayılan mod `dry-run` / planlama modudur.
-2. Yayın, deploy, harcama, veri silme ve gerçek cihaz değişikliği insan onayı ister.
-3. Gizli anahtarlar repoya veya loglara yazılmaz.
-4. Ajan çıktıları doğrulanması gereken öneridir.
-5. Her görev kimlik, durum, sahip, çıktı ve denetim kaydı taşır.
+**Önemli:** 13 rol tanımlı ve yerel modelle analiz yapabilecek altyapı hazırdır. Model bağlı değilken ajanlar arka planda bağımsız çalışan servisler değildir. Görev yönlendirme deterministiktir; LLM çıktıları öneridir, doğrulanmış gerçek değildir.
 
-## Gereksinimler
-- Python 3.10+
-- Git
-- Ubuntu veya WSL önerilir
-- İlk test için API anahtarı gerekmez
+## Ücretsiz / yerel öncelikli
+Python + SQLite + isteğe bağlı Ollama. Bulut LLM API anahtarı zorunlu değildir. Yerel modelin çalışması için Ollama ve seçilen modelin bilgisayara kurulması gerekir.
 
-## Hızlı başlangıç
-```bash
-python -m venv .venv
-source .venv/bin/activate
+## Güvenlik
+- Varsayılan mod `dry_run`.
+- Ajanlar shell komutu çalıştırmaz, cihazlara bağlanmaz, kodu otomatik değiştirmez.
+- Yayın, deploy, harcama, veri silme, Git yazma/PR ve network cihaz değişiklikleri ayrı, kapsamı açık insan onayı ister.
+- Onay kaydı kendi başına işlem yürütmez.
+- Telegram yalnızca `TELEGRAM_ALLOWED_CHAT_IDS` listesindeki sohbetlerden görev alır.
+- Gizli anahtarlar repoya veya loglara yazılmaz.
+- Mevcut projeler ayrı depolarda kalır; kodları bu repoya kopyalanmaz.
+
+## Windows kurulumu (PowerShell)
+Python 3.10+ ve Git gerekir.
+
+```powershell
+git clone https://github.com/newakkurt/ai-company.git
+cd ai-company
+git checkout feature/sqlite-task-approval
+
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -e .
 python -m company.cli doctor
-python -m company.cli task "NetCmd için yapılacak işleri analiz et"
+python -m company.cli agents
+```
+
+PowerShell sanal ortam aktivasyonunu engellerse yalnızca açık terminal oturumunda:
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+## İlk komutlar
+```powershell
+python -m company.cli agents
+python -m company.cli plan "Huawei switch SNMP network audit"
+python -m company.cli plan --all-agents "Şirket genel strateji ve proje denetimi"
+python -m company.cli list
+python -m company.cli remember "Network lab" "Huawei SNMP test notları" --tags "network,huawei,snmp"
+python -m company.cli recall "Huawei SNMP"
+```
+
+`plan` görev oluşturur ve uzman rol önerileri kaydeder; henüz model analizi yapmaz.
+
+## Yerel AI modeli (isteğe bağlı)
+1. Windows'a Ollama kur ve çalıştır.
+2. PowerShell'de bir model indir: `ollama pull qwen2.5:7b`.
+3. İsteğe bağlı ayarları proje kökündeki `.env` dosyasında tanımla; CLI bu dosyayı otomatik yükler (mevcut Windows ortam değişkenlerini ezmez):
+```powershell
+$env:AI_COMPANY_OLLAMA_URL = "http://127.0.0.1:11434"
+$env:AI_COMPANY_OLLAMA_MODEL = "qwen2.5:7b"
+``
+4. Önce `plan` ile görev oluştur, ekrana yazılan task ID'yi kullan:
+```powershell
+python -m company.cli run task-XXXXXXXXXX
+``
+Bu komut CEO ve yönlendirilen uzman roller için yerel modelden analiz alır ve SQLite'a kaydeder. Analiz dışında hiçbir işlem yapmaz. Model bilgisayarın RAM/VRAM kapasitesine göre seçilmelidir.
+
+## Telegram görev alımı
+1. BotFather üzerinden ayrı bir AI Company botu oluştur.
+2. Token'ı yerel `.env` dosyasına koy; GitHub'a veya sohbete gönderme.
+3. `TELEGRAM_BOT_TOKEN` değerini ortam değişkeni olarak yükle ve botuna `/start` gönder.
+4. `python -m company.cli telegram-id` ile bekleyen mesajlardan chat ID'ni al. Bu komut mesaj metnini göstermez.
+5. Chat ID'ni `TELEGRAM_ALLOWED_CHAT_IDS` değişkenine ekle.
+6. `python -m company.cli telegram-poll` komutunu çalıştır.
+7. Telegram'da `/task Görev açıklaması` gönder.
+
+Bot polling çalışırken makine ve internet bağlantısı açık kalmalıdır. Telegram botu görevleri yalnızca SQLite'a kaydeder.
+
+## Testler
+```powershell
 python -m unittest discover -s tests -v
 ```
-Windows PowerShell: `.venv\\Scripts\\Activate.ps1`
+GitHub Actions ayrıca Python 3.10, 3.11 ve 3.12 üzerinde testleri çalıştırır.
 
-## Mimari
-CEO / Orchestrator, teknoloji, yazılım, araştırma, pazarlama, hafıza ve QA-güvenlik ekipleri. Detaylar için `docs/ARCHITECTURE.md`.
-
-Mevcut projelerin kaynak kodları bu depoya kopyalanmaz. Her proje kendi deposunda kalır.
+## Dokümantasyon
+- [13 ajan işletim modeli](docs/AGENTS.md)
+- [Mimari](docs/ARCHITECTURE.md)
+- [Güvenlik](docs/SECURITY.md)
+- [Yol haritası](docs/ROADMAP.md)

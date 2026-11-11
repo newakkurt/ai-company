@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "policy": "metadata_only_no_source_copy",
+  "projects": [
+    {"id":"netcontrol","name":"NetControl","repository":null,"adapter":"disabled","access":"none"},
+    {"id":"netops","name":"NetOps","repository":null,"adapter":"disabled","access":"none"},
+    {"id":"netcmd","name":"NetCmd","repository":null,"adapter":"disabled","access":"none"},
+    {"id":"social_bots","name":"Social media bots","repository":"newakkurt/paylasim-botu","adapter":"disabled","access":"none"},
+    {"id":"english_telegram_bot","name":"English Telegram bot","repository":null,"adapter":"disabled","access":"none"},
+    {"id":"network_automation","name":"Network automation","repository":null,"adapter":"disabled","access":"none"}
+  ]
+}
