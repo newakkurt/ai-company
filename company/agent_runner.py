@@ -31,10 +31,18 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
     agents = {agent.id: agent for agent in load_agents()}
     assignments = [a for a in task["assignments"] if a["agent_id"] != "ceo"]
     assignments += [a for a in task["assignments"] if a["agent_id"] == "ceo"]
-    results = []
+    persisted = {
+        item["agent_id"]: item["output_text"]
+        for item in store.list_agent_outputs(task_id)
+    }
+    results = [
+        {"agent_id": assignment["agent_id"], "output": persisted[assignment["agent_id"]]}
+        for assignment in assignments
+        if assignment["agent_id"] in persisted
+    ]
     for assignment in assignments:
         agent = agents.get(assignment["agent_id"])
-        if agent is None:
+        if agent is None or agent.id in persisted:
             continue
         specialist_context = ""
         if agent.id == "ceo":
