@@ -1,0 +1,94 @@
+name: Hosted readiness monitor
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-company-hosted-readiness
+  cancel-in-progress: false
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Verify hosted AI Company readiness
+        env:
+          READY_URL: https://ai-company-ferd.onrender.com/readyz
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          url = os.environ["READY_URL"]
+          required = {
+              "ok": True,
+              "ready": True,
+              "agents": 14,
+              "mode": "analysis_only",
+              "external_actions_enabled": False,
+          }
+          last_reason = "No response received"
+
+          for attempt in range(20):
+              try:
+                  request = urllib.request.Request(
+                      url,
+                      headers={"Accept": "application/json", "User-Agent": "ai-company-readiness-monitor"},
+                  )
+                  with urllib.request.urlopen(request, timeout=15) as response:
+                      if response.status != 200:
+                          raise RuntimeError(f"HTTP {response.status}")
+                      data = json.loads(response.read().decode("utf-8"))
+
+                  problems = [
+                      f"{key} expected {expected!r}"
+                      for key, expected in required.items()
+                      if data.get(key) != expected
+                  ]
+                  provider = data.get("provider") or {}
+                  database = data.get("database") or {}
+                  if provider.get("gemini") is not True:
+                      problems.append("provider.gemini is not true")
+                  if not isinstance(provider.get("model"), str) or not provider["model"].strip():
+                      problems.append("provider.model is missing")
+                  if provider.get("ready") is not True:
+                      problems.append("provider.ready is not true")
+                  if database.get("backend") != "supabase":
+                      problems.append("database.backend is not supabase")
+                  if database.get("connected") is not True:
+                      problems.append("database.connected is not true")
+                  if database.get("error") is not None:
+                      problems.append("database.error is not null")
+
+                  if not problems:
+                      print("AI Company readiness: PASS")
+                      print(json.dumps({
+                          "agents": data["agents"],
+                          "provider_model": provider["model"],
+                          "database_backend": database["backend"],
+                          "mode": data["mode"],
+                          "external_actions_enabled": data["external_actions_enabled"],
+                      }, ensure_ascii=False))
+                      sys.exit(0)
+                  last_reason = "; ".join(problems)
+              except (urllib.error.URLError, TimeoutError, ValueError, RuntimeError) as exc:
+                  last_reason = type(exc).__name__
+
+              if attempt < 19:
+                  time.sleep(30)
+
+          print(f"AI Company readiness: FAIL ({last_reason})", file=sys.stderr)
+          sys.exit(1)
+          PY
