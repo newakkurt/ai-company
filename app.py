@@ -104,7 +104,7 @@ def _execute_analysis(task_id: str) -> None:
     _run_lock.acquire()
     try:
         state.update(status="running", message="13 role agents are preparing analysis.")
-        results = run_task(task_id)
+        results = run_task(task_id, store=store)
         state.update(status="completed", result_count=len(results), message="Analysis saved.")
     except Exception as exc:  # noqa: BLE001 - report sanitized failure to the dashboard
         state.update(status="failed", message=f"Analysis failed: {type(exc).__name__}")
