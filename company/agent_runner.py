@@ -1,4 +1,4 @@
-"""Runs role-based analysis with a local model; outputs are suggestions only."""
+"""Runs specialist analysis with a local model, then asks CEO to synthesize it."""
 from .agents import load_agents, route_task
 from .llm import OllamaProvider
 from .store import TaskStore
@@ -29,16 +29,24 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
         task = store.get_task(task_id)
 
     agents = {agent.id: agent for agent in load_agents()}
+    assignments = [a for a in task["assignments"] if a["agent_id"] != "ceo"]
+    assignments += [a for a in task["assignments"] if a["agent_id"] == "ceo"]
     results = []
-    for assignment in task["assignments"]:
+    for assignment in assignments:
         agent = agents.get(assignment["agent_id"])
         if agent is None:
             continue
+        specialist_context = ""
+        if agent.id == "ceo":
+            specialist_context = "\n\nSpecialist analysis (unverified suggestions):\n" + "\n\n".join(
+                f"[{item['agent_id']}]\n{item['output']}" for item in results
+            )
         prompt = (
             f"Task ID: {task_id}\nTask description: {task['description']}\n"
             "Execution mode: dry_run. You are preparing analysis only. "
             "Do not modify files, call external services, publish, deploy, spend money, "
             "delete data, or change network devices."
+            f"{specialist_context}"
         )
         output = provider.generate(build_system_prompt(agent), prompt)
         store.record_agent_output(task_id, agent.id, output)
