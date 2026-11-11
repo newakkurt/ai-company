@@ -100,7 +100,17 @@ Bu sürüm FastAPI tabanlı bir panel ve korumalı görev API'si içerir:
 - İsteğe bağlı model adı: `AI_COMPANY_GEMINI_MODEL=gemini-2.5-flash`.
 - 13 rol bir göreve atanabilir; `run` analiz üretir, dış işlem yapmaz.
 
-**Kalıcı veri notu:** Varsayılan SQLite yolu Render'ın geçici dosya alanındadır. Yeniden başlatma veya yeniden deploy sonrasında görev geçmişi kaybolabilir. Kalıcı üretim kullanımı için AI Company'ye ait ayrı bir PostgreSQL/Supabase veritabanı bağlanmalıdır; NetCmd veritabanı kullanılmamalıdır.
+**Kalıcı veri:** Render üzerinde `SUPABASE_URL`, `SUPABASE_ANON_KEY` ve yalnızca sunucuda tutulan `SUPABASE_DB_GATE_KEY` tanımlıysa görevler ayrı Supabase PostgreSQL veritabanına yazılır. Bu projede RLS açık, özel anahtar kontrolü sunucu tarafında yapılır. Yerel geliştirmede SQLite geri dönüşü korunur.
+
+**Render ortam değişkenleri**
+- `AI_COMPANY_API_KEY`: Panel/API erişim anahtarı.
+- `SUPABASE_URL`: AI Company'ye özel Supabase proje URL'si.
+- `SUPABASE_ANON_KEY`: Bu projeye ait public anon key.
+- `SUPABASE_DB_GATE_KEY`: Veritabanı pre-request doğrulaması için gizli sunucu anahtarı; istemciye veya Git'e koyma.
+- `GEMINI_API_KEY`: Bulut analizleri için Gemini anahtarı. Bu değişken eklenmeden ajan analizi başlatılamaz.
+- `AI_COMPANY_GEMINI_MODEL`: İsteğe bağlı model seçimi (varsayılan `gemini-2.5-flash`).
+
+NetCmd projesi/veritabanı kullanılmaz. Supabase Free projeleri 500 MB veritabanı kotası ve düşük aktivitede otomatik duraklatma sınırlamalarına tabidir.
 
 ## Dokümantasyon
 - [13 ajan işletim modeli](docs/AGENTS.md)
