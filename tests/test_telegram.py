@@ -42,6 +42,14 @@ class TelegramIntakeTests(unittest.TestCase):
         self.assertEqual(self.store.list_tasks(), [])
         self.bot.send_message.assert_called_once()
 
+    def test_pending_chat_id_discovery_returns_ids_only(self):
+        self.bot._api = Mock(return_value=[
+            {"update_id": 1, "message": {"chat": {"id": 12345}, "text": "/start"}},
+            {"update_id": 2, "message": {"chat": {"id": 12345}, "text": "hello"}},
+            {"update_id": 3, "message": {"chat": {"id": -555}, "text": "group"}}
+        ])
+        self.assertEqual(self.bot.pending_chat_ids(), ["-555", "12345"])
+
     def test_missing_allowlist_is_rejected(self):
         with self.assertRaises(ValueError):
             TelegramIntake(token="test-token", allowed_chat_ids=[], store=self.store)
