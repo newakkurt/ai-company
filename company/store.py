@@ -1,9 +1,13 @@
-"""Local SQLite task, assignment, agent-output, knowledge, and audit store."""
+"""SQLite development store and secured Supabase PostgREST cloud store."""
 from datetime import datetime, timezone
 from pathlib import Path
 import json
+import os
 import sqlite3
 import uuid
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "data" / "company.db"
@@ -13,7 +17,181 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class SupabaseTaskStore:
+    """Server-side PostgREST client protected by a private pre-request API-key gate."""
+
+    def __init__(self):
+        self.base_url = os.environ["SUPABASE_URL"].rstrip("/") + "/rest/v1"
+        self.anon_key = os.environ["SUPABASE_ANON_KEY"]
+        self.db_gate_key = os.environ["SUPABASE_DB_GATE_KEY"]
+
+    def _request(self, table, method="GET", params=None, body=None, prefer=None):
+        query = urlencode(params or {}, doseq=True)
+        url = f"{self.base_url}/{table}" + (f"?{query}" if query else "")
+        headers = {
+            "apikey": self.anon_key,
+            "Authorization": f"Bearer {self.anon_key}",
+            "x-ai-company-key": self.db_gate_key,
+            "Accept": "application/json",
+        }
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        if prefer:
+            headers["Prefer"] = prefer
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+        request = Request(url, data=data, headers=headers, method=method)
+        try:
+            with urlopen(request, timeout=25) as response:
+                raw = response.read()
+        except HTTPError as exc:
+            detail = exc.read(2048).decode("utf-8", errors="replace")
+            raise RuntimeError(f"Supabase database request failed ({exc.code}): {detail}") from exc
+        except (URLError, TimeoutError) as exc:
+            raise RuntimeError("Supabase database is temporarily unreachable") from exc
+        if not raw:
+            return []
+        return json.loads(raw.decode("utf-8"))
+
+    def _event(self, task_id, event_type, actor, details):
+        self._request("events", "POST", body={
+            "event_id": uuid.uuid4().hex,
+            "task_id": task_id,
+            "event_type": event_type,
+            "actor": actor,
+            "details_json": details,
+            "created_at": utc_now(),
+        }, prefer="return=minimal")
+
+    def create_task(self, description: str) -> dict:
+        description = description.strip()
+        if not description:
+            raise ValueError("Task description cannot be empty")
+        task_id = f"task-{uuid.uuid4().hex[:10]}"
+        now = utc_now()
+        self._request("tasks", "POST", body={
+            "task_id": task_id, "description": description, "status": "planned",
+            "owner": "ceo", "execution_mode": "dry_run", "approval_required": True,
+            "created_at": now, "updated_at": now,
+        }, prefer="return=minimal")
+        self._event(task_id, "task_created", "user", {"mode": "dry_run"})
+        return self.get_task(task_id)
+
+    def assign_agents(self, task_id: str, agent_ids: list[str]):
+        now = utc_now()
+        rows = [{
+            "assignment_id": uuid.uuid4().hex, "task_id": task_id,
+            "agent_id": agent_id, "status": "suggested", "assigned_at": now,
+        } for agent_id in dict.fromkeys(agent_ids)]
+        if rows:
+            self._request("assignments", "POST", {"on_conflict": "task_id,agent_id"},
+                          rows, "resolution=ignore-duplicates,return=minimal")
+        self._event(task_id, "agent_assignments_suggested", "ceo", {
+            "agent_ids": list(dict.fromkeys(agent_ids)), "execution": "not_started"
+        })
+        self._request("tasks", "PATCH", {"task_id": f"eq.{task_id}"},
+                      {"updated_at": now}, "return=minimal")
+        return self.list_assignments(task_id)
+
+    def list_assignments(self, task_id: str):
+        return self._request("assignments", params={
+            "select": "agent_id,status,assigned_at", "task_id": f"eq.{task_id}",
+            "order": "assigned_at.asc,agent_id.asc",
+        })
+
+    def record_agent_output(self, task_id: str, agent_id: str, output_text: str):
+        self._request("agent_outputs", "POST", body={
+            "output_id": uuid.uuid4().hex, "task_id": task_id, "agent_id": agent_id,
+            "output_text": output_text, "created_at": utc_now(),
+        }, prefer="return=minimal")
+        self._event(task_id, "agent_analysis_saved", agent_id, {
+            "output_chars": len(output_text), "execution": "analysis_only"
+        })
+        return True
+
+    def list_agent_outputs(self, task_id: str):
+        return self._request("agent_outputs", params={
+            "select": "agent_id,output_text,created_at", "task_id": f"eq.{task_id}",
+            "order": "created_at.asc",
+        })
+
+    def remember(self, title: str, body: str, tags: list[str] | None = None):
+        title, body = title.strip(), body.strip()
+        if not title or not body:
+            raise ValueError("Knowledge title and body are required")
+        note_id = f"note-{uuid.uuid4().hex[:10]}"
+        self._request("knowledge_notes", "POST", body={
+            "note_id": note_id, "title": title, "body": body,
+            "tags": tags or [], "created_at": utc_now(),
+        }, prefer="return=minimal")
+        return note_id
+
+    def search_knowledge(self, query: str = "", limit: int = 20):
+        rows = self._request("knowledge_notes", params={
+            "select": "note_id,title,body,tags,created_at", "order": "created_at.desc",
+            "limit": str(max(1, min(limit * 5, 200))),
+        })
+        terms = [term.casefold() for term in query.split() if term.strip()]
+        results = []
+        for item in rows:
+            haystack = (item["title"] + " " + item["body"] + " " + " ".join(item.get("tags") or [])).casefold()
+            if all(term in haystack for term in terms):
+                results.append(item)
+            if len(results) >= limit:
+                break
+        return results
+
+    def get_task(self, task_id: str):
+        rows = self._request("tasks", params={
+            "select": "*", "task_id": f"eq.{task_id}", "limit": "1",
+        })
+        if not rows:
+            return None
+        item = rows[0]
+        item["approval_required"] = bool(item["approval_required"])
+        item["events"] = self._request("events", params={
+            "select": "*", "task_id": f"eq.{task_id}", "order": "created_at.asc",
+        })
+        for event in item["events"]:
+            event["details"] = event.pop("details_json", {}) or {}
+        item["assignments"] = self.list_assignments(task_id)
+        item["agent_outputs"] = self.list_agent_outputs(task_id)
+        return item
+
+    def list_tasks(self, limit: int = 20):
+        rows = self._request("tasks", params={
+            "select": "*", "order": "created_at.desc",
+            "limit": str(max(1, min(limit, 100))),
+        })
+        for row in rows:
+            row["approval_required"] = bool(row["approval_required"])
+        return rows
+
+    def record_approval(self, task_id: str, actor: str, note: str = ""):
+        item = self.get_task(task_id)
+        if item is None:
+            raise KeyError(f"Task not found: {task_id}")
+        if item["status"] not in ("planned", "approval_required"):
+            raise ValueError(f"Cannot approve task in status: {item['status']}")
+        self._request("tasks", "PATCH", {"task_id": f"eq.{task_id}"},
+                      {"status": "approved_for_next_step", "updated_at": utc_now()},
+                      "return=minimal")
+        self._event(task_id, "human_approval_recorded", actor, {
+            "note": note,
+            "scope": "approval is only for the next explicitly described step; no execution is triggered",
+        })
+        return self.get_task(task_id)
+
+
 class TaskStore:
+    """Use Supabase in hosted environments and SQLite for local development."""
+
+    def __new__(cls, db_path: Path | str = DB_PATH):
+        if all(os.getenv(k) for k in (
+            "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY"
+        )):
+            return SupabaseTaskStore()
+        return super().__new__(cls)
+
     def __init__(self, db_path: Path | str = DB_PATH):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,7 +264,6 @@ class TaskStore:
         )
 
     def assign_agents(self, task_id: str, agent_ids: list[str]):
-        """Record suggested owners only; this does not launch agents."""
         now = utc_now()
         with self._connect() as db:
             if db.execute("SELECT 1 FROM tasks WHERE task_id=?", (task_id,)).fetchone() is None:
@@ -191,7 +368,6 @@ class TaskStore:
             return [dict(row) for row in rows]
 
     def record_approval(self, task_id: str, actor: str, note: str = ""):
-        """Record human approval only; this never executes the task."""
         with self._connect() as db:
             row = db.execute("SELECT status FROM tasks WHERE task_id=?", (task_id,)).fetchone()
             if row is None:
