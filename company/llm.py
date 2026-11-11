@@ -60,9 +60,17 @@ class GeminiProvider:
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     error_payload = {}
                 error_data = error_payload.get("error") or {}
-                safe_message = str(error_data.get("message") or "")[:120]
+                safe_message = " ".join(str(error_data.get("message") or "").split())[:180]
+                safe_description = " ".join(
+                    str(error_data.get("description") or error_payload.get("description") or "").split()
+                )[:180]
+                provider_status = str(error_data.get("status") or "")[:40]
+                detail_types = []
                 quota_ids = []
                 for detail in error_data.get("details") or []:
+                    detail_type = str(detail.get("@type") or "").rsplit(".", 1)[-1]
+                    if detail_type and detail_type not in detail_types:
+                        detail_types.append(detail_type[:40])
                     quota_failure = detail.get("quotaFailure") or {}
                     for violation in quota_failure.get("violations") or []:
                         quota_id = violation.get("quotaId") or violation.get("quotaMetric")
@@ -84,9 +92,15 @@ class GeminiProvider:
                     continue
 
                 summary = f"Gemini API returned HTTP {status}"
+                if provider_status:
+                    summary += "; provider_status=" + provider_status
                 if quota_ids:
                     summary += "; quota=" + ",".join(quota_ids)
-                if safe_message:
+                if detail_types:
+                    summary += "; details=" + ",".join(detail_types)
+                if safe_description:
+                    summary += "; description=" + safe_description
+                elif safe_message:
                     summary += "; " + safe_message
                 if status == 429:
                     summary += "; check Google AI Studio Usage and Rate Limits"
