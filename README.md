@@ -59,7 +59,7 @@ python -m company.cli recall "Huawei SNMP"
 ## Yerel AI modeli (isteğe bağlı)
 1. Windows'a Ollama kur ve çalıştır.
 2. PowerShell'de bir model indir: `ollama pull qwen2.5:7b`.
-3. İsteğe bağlı ayarları `.env` dosyasında veya PowerShell ortam değişkenlerinde tanımla:
+3. İsteğe bağlı ayarları proje kökündeki `.env` dosyasında tanımla; CLI bu dosyayı otomatik yükler (mevcut Windows ortam değişkenlerini ezmez):
 ```powershell
 $env:AI_COMPANY_OLLAMA_URL = "http://127.0.0.1:11434"
 $env:AI_COMPANY_OLLAMA_MODEL = "qwen2.5:7b"
