@@ -1,5 +1,5 @@
 """SQLite development store and secured Supabase PostgREST cloud store."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
 import os
@@ -131,6 +131,11 @@ class SupabaseTaskStore:
         self._event(task_id, "agent_analysis_saved", agent_id, {
             "output_chars": len(output_text), "execution": "analysis_only"
         })
+        self._request("tasks", "PATCH", {"task_id": f"eq.{task_id}"},
+                      {"updated_at": utc_now()}, "return=minimal")
+        self._request("assignments", "PATCH", {
+            "task_id": f"eq.{task_id}", "agent_id": f"eq.{agent_id}",
+        }, {"status": "completed"}, "return=minimal")
         return True
 
     def list_agent_outputs(self, task_id: str):
@@ -141,6 +146,7 @@ class SupabaseTaskStore:
 
     def claim_next_task(self):
         """Atomically claim one analysis-only task; concurrent pollers cannot claim it twice."""
+        self.requeue_stale_tasks()
         rows = self._request("tasks", params={
             "select": "task_id", "status": "eq.planned",
             "execution_mode": "eq.dry_run", "order": "created_at.asc",
@@ -162,6 +168,29 @@ class SupabaseTaskStore:
         self._event(task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
         return task_id
 
+    def requeue_stale_tasks(self, stale_minutes: int = 60):
+        """Recover interrupted dry-run tasks after a quiet lease window."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
+        rows = self._request("tasks", params={
+            "select": "task_id", "status": "eq.running",
+            "execution_mode": "eq.dry_run", "updated_at": f"lt.{cutoff}",
+            "order": "updated_at.asc", "limit": "20",
+        })
+        requeued = 0
+        for row in rows:
+            task_id = row["task_id"]
+            changed = self._request("tasks", "PATCH", {
+                "task_id": f"eq.{task_id}", "status": "eq.running",
+                "updated_at": f"lt.{cutoff}", "execution_mode": "eq.dry_run",
+            }, {"status": "planned", "updated_at": utc_now()}, "return=representation")
+            if changed:
+                self._event(task_id, "agent_task_requeued", "worker", {
+                    "reason": "stale_worker_lease", "stale_minutes": stale_minutes,
+                    "resume_policy": "skip_agents_with_persisted_outputs",
+                })
+                requeued += 1
+        return requeued
+
     def complete_task(self, task_id: str, output_count: int):
         now = utc_now()
         self._request("tasks", "PATCH", {
@@ -178,8 +207,9 @@ class SupabaseTaskStore:
         self._request("tasks", "PATCH", {
             "task_id": f"eq.{task_id}", "status": "eq.running",
         }, {"status": "failed", "updated_at": now}, "return=minimal")
-        self._request("assignments", "PATCH", {"task_id": f"eq.{task_id}"},
-                      {"status": "failed"}, "return=minimal")
+        self._request("assignments", "PATCH", {
+            "task_id": f"eq.{task_id}", "status": "in.(suggested,running)",
+        }, {"status": "failed"}, "return=minimal")
         self._event(task_id, "agent_task_failed", "worker", {
             "error_type": error_type, "retry_policy": "manual_review"
         })
@@ -416,6 +446,11 @@ class TaskStore:
             )
             self._event(db, task_id, "agent_analysis_saved", agent_id,
                         {"output_chars": len(output_text), "execution": "analysis_only"})
+            db.execute("UPDATE tasks SET updated_at=? WHERE task_id=?", (now, task_id))
+            db.execute(
+                "UPDATE assignments SET status='completed' WHERE task_id=? AND agent_id=?",
+                (task_id, agent_id)
+            )
         return True
 
     def list_agent_outputs(self, task_id: str):
@@ -428,6 +463,7 @@ class TaskStore:
 
     def claim_next_task(self):
         """Atomically claim one analysis-only task; concurrent pollers cannot claim it twice."""
+        self.requeue_stale_tasks()
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
@@ -450,6 +486,32 @@ class TaskStore:
             self._event(db, task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
             return task_id
 
+    def requeue_stale_tasks(self, stale_minutes: int = 60):
+        """Recover interrupted dry-run tasks after a quiet lease window."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT task_id FROM tasks
+                   WHERE status='running' AND execution_mode='dry_run' AND updated_at < ?
+                   ORDER BY updated_at ASC LIMIT 20""",
+                (cutoff,)
+            ).fetchall()
+            now = utc_now()
+            for row in rows:
+                task_id = row["task_id"]
+                changed = db.execute(
+                    """UPDATE tasks SET status='planned', updated_at=?
+                       WHERE task_id=? AND status='running'
+                       AND execution_mode='dry_run' AND updated_at < ?""",
+                    (now, task_id, cutoff)
+                ).rowcount
+                if changed:
+                    self._event(db, task_id, "agent_task_requeued", "worker", {
+                        "reason": "stale_worker_lease", "stale_minutes": stale_minutes,
+                        "resume_policy": "skip_agents_with_persisted_outputs",
+                    })
+            return len(rows)
+
     def complete_task(self, task_id: str, output_count: int):
         with self._connect() as db:
             now = utc_now()
@@ -469,7 +531,10 @@ class TaskStore:
                 "UPDATE tasks SET status='failed', updated_at=? WHERE task_id=? AND status='running'",
                 (now, task_id)
             )
-            db.execute("UPDATE assignments SET status='failed' WHERE task_id=?", (task_id,))
+            db.execute(
+                "UPDATE assignments SET status='failed' WHERE task_id=? AND status IN ('suggested','running')",
+                (task_id,)
+            )
             self._event(db, task_id, "agent_task_failed", "worker", {
                 "error_type": error_type, "retry_policy": "manual_review"
             })
