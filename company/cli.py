@@ -5,6 +5,8 @@ from .orchestrator import doctor
 
 
 def main():
+    from .config import load_local_env
+    load_local_env()
     parser = argparse.ArgumentParser(prog="ai-company")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor", help="Check local scaffold")
