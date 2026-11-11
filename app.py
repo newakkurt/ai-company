@@ -92,12 +92,15 @@ def require_api_key(authorization: str | None = Header(default=None)) -> None:
 
 
 def provider_status() -> dict[str, Any]:
-    configured = bool(os.getenv("GEMINI_API_KEY"))
+    gemini_configured = bool(os.getenv("GEMINI_API_KEY"))
+    groq_configured = bool(os.getenv("GROQ_API_KEY"))
     return {
-        "gemini": configured,
+        "gemini": gemini_configured,
+        "groq": groq_configured,
         "ollama": False,
         "model": os.getenv("AI_COMPANY_GEMINI_MODEL", "gemini-3.5-flash-lite"),
-        "ready": configured,
+        "fallback_model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+        "ready": gemini_configured or groq_configured,
     }
 
 

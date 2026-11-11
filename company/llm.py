@@ -127,6 +127,96 @@ class GeminiProvider:
         return content
 
 
+class GroqAPIError(RuntimeError):
+    """Safe Groq provider error that never contains an API key."""
+
+
+class GroqProvider:
+    """OpenAI-compatible Groq provider, enabled only when GROQ_API_KEY is configured."""
+
+    DEFAULT_MODEL = "llama-3.1-8b-instant"
+    ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
+
+    def __init__(self, api_key=None, model=None, timeout=45):
+        self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
+        self.model = model or os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
+        self.timeout = timeout
+
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
+        if not self.api_key:
+            raise RuntimeError("GROQ_API_KEY is not configured")
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "max_tokens": 2048,
+            "temperature": 0.2,
+        }
+        request = Request(
+            self.ENDPOINT,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": "Bearer " + self.api_key,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise GroqAPIError(f"Groq API returned HTTP {int(exc.code)}") from exc
+        except (URLError, TimeoutError) as exc:
+            raise GroqAPIError(
+                f"Groq API network request failed ({type(exc).__name__})."
+            ) from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise GroqAPIError("Groq API returned an invalid JSON response.") from exc
+
+        choices = data.get("choices") or []
+        message = (choices[0].get("message") or {}) if choices else {}
+        content = message.get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise GroqAPIError("Groq API returned an empty response.")
+        return content.strip()
+
+
+class FallbackProvider:
+    """Use Groq only when Gemini is temporarily unavailable or quota-limited."""
+
+    def __init__(self, primary, fallback):
+        self.primary = primary
+        self.fallback = fallback
+
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
+        try:
+            return self.primary.generate(system_prompt, user_prompt)
+        except GeminiAPIError as exc:
+            message = str(exc)
+            retryable = any(
+                marker in message
+                for marker in ("HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504")
+            )
+            if not retryable:
+                raise
+            print(
+                "agent_worker: Gemini unavailable; using configured Groq fallback",
+                flush=True,
+            )
+            return self.fallback.generate(system_prompt, user_prompt)
+
+
 def get_provider():
-    """Use the configured Gemini Flash-Lite model; never silently fall back to another provider."""
+    """Prefer Gemini; use Groq as a quota-safe fallback when its key is configured."""
+    gemini = GeminiProvider() if os.getenv("GEMINI_API_KEY") else None
+    groq = GroqProvider() if os.getenv("GROQ_API_KEY") else None
+    if gemini and groq:
+        return FallbackProvider(gemini, groq)
+    if gemini:
+        return gemini
+    if groq:
+        return groq
     return GeminiProvider()
