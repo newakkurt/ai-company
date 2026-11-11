@@ -1,0 +1,12 @@
+actions:
+  read_public_docs: {approval: false}
+  inspect_connected_repository: {approval: false}
+  create_local_plan: {approval: false}
+  edit_local_scaffold: {approval: true}
+  commit_or_push: {approval: true}
+  create_pull_request: {approval: true}
+  publish_social_post: {approval: true}
+  deploy_production: {approval: true}
+  spend_or_enable_paid_service: {approval: true}
+  change_network_device: {approval: true}
+  delete_user_data: {approval: true}
