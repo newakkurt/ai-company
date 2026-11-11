@@ -293,7 +293,9 @@ async def buymeacoffee_webhook(request: Request, background: BackgroundTasks,
     store.upsert_membership(membership)
     store.record_payment_event(event_key, event_type, subscription_id)
 
-    if event_type == "membership.started" and not task.get("agent_outputs"):
+    run_status = _run_state.get(task_id, {}).get("status")
+    if event_type in {"membership.started", "membership.updated"} and not task.get("agent_outputs") and run_status not in {"queued", "running", "completed"}:
+        _run_state[task_id] = {"status": "queued", "message": "Paid membership received; specialist analysis queued."}
         background.add_task(_execute_analysis, task_id)
     return {"ok": True, "membership_status": "active", "task_id": task_id,
             "assigned_agents": len(load_agents())}
