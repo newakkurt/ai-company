@@ -25,7 +25,7 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(len(saved["agent_outputs"]), 1)
         self.assertEqual(saved["execution_mode"], "dry_run")
         self.assertEqual(saved["status"], "planned")
-        self.assertTrue(all(a["status"] == "suggested" for a in saved["assignments"]))
+        self.assertTrue(all(a["status"] == "completed" for a in saved["assignments"]))
 
     def test_ceo_runs_last_and_receives_specialist_analysis(self):
         provider = Mock()
