@@ -96,7 +96,7 @@ def provider_status() -> dict[str, Any]:
     return {
         "gemini": configured,
         "ollama": False,
-        "model": os.getenv("AI_COMPANY_GEMINI_MODEL", "gemini-3.8-flash"),
+        "model": os.getenv("AI_COMPANY_GEMINI_MODEL", "gemini-3.5-flash-lite"),
         "ready": configured,
     }
 

@@ -1,4 +1,4 @@
-"""Gemini 3.8 Flash provider with bounded retries and secret-safe errors."""
+"""Gemini Flash-Lite provider with bounded retries and secret-safe errors."""
 import json
 import os
 import time
@@ -13,7 +13,7 @@ class GeminiAPIError(RuntimeError):
 class GeminiProvider:
     """Google Gemini API provider. The API key is read only from the environment."""
 
-    DEFAULT_MODEL = "gemini-3.8-flash"
+    DEFAULT_MODEL = "gemini-3.5-flash-lite"
     RETRYABLE_STATUS = {429, 500, 502, 503, 504}
     RETRY_DELAYS = (5, 15)
 
@@ -128,5 +128,5 @@ class GeminiProvider:
 
 
 def get_provider():
-    """Use Gemini 3.8 Flash exclusively; never silently fall back to another model."""
+    """Use the configured Gemini Flash-Lite model; never silently fall back to another provider."""
     return GeminiProvider()
