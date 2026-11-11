@@ -63,6 +63,20 @@ class TelegramIntake:
         self.send_message(chat_id, "Komut anlaşılmadı. Yardım için /help yaz.")
         return True
 
+    def pending_chat_ids(self):
+        """Read pending updates and return only numeric chat IDs, never message text."""
+        updates = self._api(
+            "getUpdates",
+            {"timeout": 0, "allowed_updates": json.dumps(["message"])},
+            timeout=10
+        )
+        ids = {
+            str((update.get("message") or {}).get("chat", {}).get("id"))
+            for update in updates
+            if (update.get("message") or {}).get("chat", {}).get("id") is not None
+        }
+        return sorted(ids)
+
     def poll_forever(self):
         offset = None
         while True:
