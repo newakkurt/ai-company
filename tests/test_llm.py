@@ -77,6 +77,27 @@ class GeminiProviderTests(unittest.TestCase):
         request.assert_called_once()
         sleep.assert_not_called()
 
+    def test_429_records_safe_google_description_and_status(self):
+        error = HTTPError(
+            "https://generativelanguage.googleapis.com/test",
+            429,
+            "Too Many Requests",
+            {},
+            io.BytesIO(
+                b'{"error":{"status":"RESOURCE_EXHAUSTED","description":"Project spend cap exceeded","message":"quota","details":[{"@type":"type.googleapis.com/google.rpc.Help"}]}}'
+            ),
+        )
+        with patch("company.llm.urlopen", side_effect=error):
+            provider = GeminiProvider(api_key="secret-test-key")
+            with self.assertRaises(GeminiAPIError) as raised:
+                provider.generate("system", "user")
+
+        message = str(raised.exception)
+        self.assertIn("provider_status=RESOURCE_EXHAUSTED", message)
+        self.assertIn("description=Project spend cap exceeded", message)
+        self.assertIn("details=Help", message)
+        self.assertNotIn("secret-test-key", message)
+
     def test_does_not_retry_invalid_api_key(self):
         error = HTTPError(
             "https://generativelanguage.googleapis.com/test",
