@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -59,6 +59,11 @@ jobs:
                   ]
                   provider = data.get("provider") or {}
                   database = data.get("database") or {}
+                  worker = data.get("worker") or {}
+                  if worker.get("enabled") is not True:
+                      problems.append("worker.enabled is not true")
+                  if worker.get("running") is not True:
+                      problems.append("worker.running is not true")
                   if provider.get("gemini") is not True:
                       problems.append("provider.gemini is not true")
                   if not isinstance(provider.get("model"), str) or not provider["model"].strip():
@@ -79,6 +84,7 @@ jobs:
                           "provider_model": provider["model"],
                           "database_backend": database["backend"],
                           "mode": data["mode"],
+                          "worker": worker,
                           "external_actions_enabled": data["external_actions_enabled"],
                       }, ensure_ascii=False))
                       sys.exit(0)
