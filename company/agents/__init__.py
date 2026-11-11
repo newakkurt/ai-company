@@ -1,7 +1,7 @@
 """Registry and safe deterministic routing for the 13 company roles.
 
-These are role agents, not autonomous LLM workers yet. The registry and router
-work offline; model-backed reasoning and external tools are separate milestones.
+Role prompts can be invoked through the optional local-model runner. They are
+not autonomous tool-using workers; the registry and router also work offline.
 """
 from dataclasses import dataclass
 import json
