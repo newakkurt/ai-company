@@ -54,6 +54,29 @@ class GeminiProviderTests(unittest.TestCase):
         self.assertEqual(request.call_count, 2)
         sleep.assert_called_once_with(5)
 
+    def test_429_is_not_blindly_retried_and_records_quota_id(self):
+        error = HTTPError(
+            "https://generativelanguage.googleapis.com/test",
+            429,
+            "Too Many Requests",
+            {},
+            io.BytesIO(
+                b'{"error":{"message":"Quota exceeded","details":[{"quotaFailure":{"violations":[{"quotaId":"GenerateRequestsPerDay-FreeTier"}]}}]}}'
+            ),
+        )
+        with patch("company.llm.urlopen", side_effect=error) as request, patch(
+            "company.llm.time.sleep"
+        ) as sleep:
+            provider = GeminiProvider(api_key="secret-test-key")
+            with self.assertRaises(GeminiAPIError) as raised:
+                provider.generate("system", "user")
+
+        self.assertIn("HTTP 429", str(raised.exception))
+        self.assertIn("GenerateRequestsPerDay-FreeTier", str(raised.exception))
+        self.assertNotIn("secret-test-key", str(raised.exception))
+        request.assert_called_once()
+        sleep.assert_not_called()
+
     def test_does_not_retry_invalid_api_key(self):
         error = HTTPError(
             "https://generativelanguage.googleapis.com/test",
