@@ -15,6 +15,12 @@ def main():
     plan.add_argument("description")
     run = sub.add_parser("run", help="Run local-model analysis for a planned task (analysis only)")
     run.add_argument("task_id")
+    remember = sub.add_parser("remember", help="Save a local company knowledge note")
+    remember.add_argument("title")
+    remember.add_argument("body")
+    remember.add_argument("--tags", default="")
+    recall = sub.add_parser("recall", help="Search local company knowledge")
+    recall.add_argument("query", nargs="?", default="")
     sub.add_parser("list", help="List recent tasks")
     approve = sub.add_parser("approve", help="Record human approval; does not execute")
     approve.add_argument("task_id")
@@ -55,6 +61,18 @@ def main():
             print(f"\n=== {result['agent_id']} ===\n")
             print(result["output"])
         print("\nAnalysis saved locally. No external action was executed.")
+    elif args.command == "remember":
+        note_id = TaskStore().remember(args.title, args.body, [x.strip() for x in args.tags.split(",") if x.strip()])
+        print(f"Knowledge saved: {note_id}")
+    elif args.command == "recall":
+        notes = TaskStore().search_knowledge(args.query)
+        if not notes:
+            print("No matching knowledge notes.")
+        for note in notes:
+            print(f"\n{note['note_id']} — {note['title']}")
+            print(note["body"])
+            if note["tags"]:
+                print("Tags: " + ", ".join(note["tags"]))
     elif args.command == "list":
         items = TaskStore().list_tasks()
         if not items:
