@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>New Akkurt AI Company</title>
+  <style>
+    :root{color-scheme:dark;--bg:#08111f;--panel:#101d30;--line:#24364f;--muted:#9eb0c8;--text:#edf4ff;--accent:#55c2ff;--ok:#43d6a0;--warn:#f4c46a}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 15% 0%,#163451 0,transparent 38%),var(--bg);color:var(--text);font:15px/1.55 system-ui,Segoe UI,sans-serif}
+    main{max-width:1050px;margin:auto;padding:28px 18px 60px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+    h1{font-size:clamp(25px,5vw,38px);margin:0}.sub{color:var(--muted);margin:6px 0 22px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:18px 0}
+    .panel{background:linear-gradient(145deg,#13243a,#0e192a);border:1px solid var(--line);border-radius:15px;padding:18px;box-shadow:0 12px 36px #0003}
+    .metric{font-size:28px;font-weight:750}.muted{color:var(--muted)}label{display:block;font-weight:650;margin:0 0 7px}
+    input,textarea{width:100%;border:1px solid #354a65;border-radius:9px;background:#081321;color:var(--text);padding:12px;font:inherit}
+    textarea{min-height:90px;resize:vertical}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    button{border:0;border-radius:9px;background:var(--accent);color:#03111d;padding:11px 16px;font-weight:750;cursor:pointer}
+    button.secondary{background:#233a55;color:var(--text);border:1px solid #3b5573}button:disabled{opacity:.5;cursor:not-allowed}
+    .task{border-top:1px solid var(--line);padding:14px 0}.task:first-child{border-top:0}.status{font-size:12px;color:var(--ok);font-weight:700}
+    pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#081321;padding:12px;border-radius:9px;color:#d5e5f9}
+    .notice{padding:10px 12px;border:1px solid #6b5429;background:#2b2415;color:#f4dca9;border-radius:9px;margin:12px 0}
+    .hidden{display:none}@media(max-width:600px){main{padding:20px 13px}.panel{padding:14px}}
+  </style>
+</head>
+<body>
+<main>
+  <div class="top"><div><h1>AI Company</h1><div class="sub">13 uzman rol · CEO orkestrasyonu · insan onaylı analiz</div></div><div class="row"><span id="health" class="muted">Bağlantı kontrol ediliyor…</span><button class="secondary" id="refresh">Yenile</button></div></div>
+  <div class="grid">
+    <section class="panel"><div class="metric">13</div><div class="muted">Tanımlı uzman ajan</div></section>
+    <section class="panel"><div class="metric">DRY-RUN</div><div class="muted">Dış işlem ve otomatik yayın kapalı</div></section>
+    <section class="panel"><div class="metric" id="provider">—</div><div class="muted">Model sağlayıcısı</div></section>
+  </div>
+  <section class="panel">
+    <label for="key">API erişim anahtarı</label>
+    <div class="row"><input id="key" type="password" autocomplete="off" placeholder="Render AI_COMPANY_API_KEY değerini gir"><button id="saveKey">Bağlan</button></div>
+    <p class="muted">Anahtar yalnızca bu sekmenin oturum belleğinde tutulur; GitHub'a veya sunucuya yazılmaz.</p>
+  </section>
+  <section class="panel" style="margin-top:14px">
+    <h2>Yeni görev</h2>
+    <label for="description">Görev açıklaması</label>
+    <textarea id="description" placeholder="Örn. NetControl projesi için güvenli dağıtım planı hazırla."></textarea>
+    <div class="row" style="margin-top:10px"><button id="create">13 ajana ata</button><span id="message" class="muted"></span></div>
+  </section>
+  <section class="panel" style="margin-top:14px">
+    <div class="top"><h2>Görevler</h2><span class="muted">Son 50 görev</span></div>
+    <div id="tasks" class="muted">Görevler yükleniyor…</div>
+  </section>
+  <p class="muted" style="margin-top:18px">Güvenlik: ajanlar analiz ve öneri üretir. Komut çalıştırma, Git yazma, deploy, yayın, ödeme, veri silme ve ağ cihazı değişikliği bu sürümde kapalıdır.</p>
+</main>
+<script>
+const $=s=>document.querySelector(s);let apiKey=sessionStorage.getItem("ai_company_key")||"";
+$("#key").value=apiKey;
+function headers(){return {"Authorization":"Bearer "+apiKey,"Content-Type":"application/json"}}
+async function api(path,options={}){const r=await fetch(path,{...options,headers:{...headers(),...(options.headers||{})}});let data={};try{data=await r.json()}catch{}if(!r.ok)throw new Error(data.detail||("HTTP "+r.status));return data}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+async function refresh(){try{const h=await fetch("/healthz").then(r=>r.json());$("#health").textContent=h.ok?"API çevrimiçi":"API yanıtı sorunlu";if(apiKey){const s=await api("/api/status");$("#provider").textContent=s.provider.gemini?"Gemini":s.provider.ollama?"Ollama":"Model yok";await loadTasks()}else{$("#tasks").textContent="Görevleri görmek için API anahtarını gir."}}catch(e){$("#health").textContent="Bağlantı hatası";$("#message").textContent=e.message}}
+async function loadTasks(){const d=await api("/api/tasks");$("#tasks").innerHTML=d.tasks.length?d.tasks.map(t=>`<div class="task"><div class="top"><strong>${esc(t.description)}</strong><span class="status">${esc(t.status)}</span></div><div class="muted">${esc(t.task_id)} · ${esc(t.created_at)} · ${t.approval_required?"İnsan onayı gerekli":"Onay gerekmiyor"}</div><div class="row" style="margin-top:8px"><button class="secondary" data-run="${esc(t.task_id)}">Analizi başlat</button><button class="secondary" data-detail="${esc(t.task_id)}">Detay</button></div><div id="detail-${esc(t.task_id)}"></div></div>`).join(""):"Henüz görev yok."}
+$("#tasks").addEventListener("click",async e=>{const id=e.target.dataset.run||e.target.dataset.detail;if(!id)return;try{if(e.target.dataset.run){await api("/api/tasks/"+encodeURIComponent(id)+"/run",{method:"POST"});$("#message").textContent="Analiz kuyruğa alındı."}else{const d=await api("/api/tasks/"+encodeURIComponent(id));$("#detail-"+id).innerHTML="<pre>"+esc(JSON.stringify({assignments:d.assignments,outputs:d.agent_outputs,run_state:d.run_state},null,2))+"</pre>"}await loadTasks()}catch(err){$("#message").textContent=err.message}});
+$("#saveKey").onclick=async()=>{apiKey=$("#key").value.trim();sessionStorage.setItem("ai_company_key",apiKey);await refresh()};
+$("#create").onclick=async()=>{try{const description=$("#description").value.trim();const d=await api("/api/tasks",{method:"POST",body:JSON.stringify({description})});$("#message").textContent="Görev oluşturuldu: "+d.task_id+" (13 rol atandı)";$("#description").value="";await loadTasks()}catch(e){$("#message").textContent=e.message}};
+$("#refresh").onclick=refresh;refresh();
+</script>
+</body>
+</html>

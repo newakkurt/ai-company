@@ -1,6 +1,6 @@
 """Runs specialist analysis with a local model, then asks CEO to synthesize it."""
 from .agents import load_agents, route_task
-from .llm import OllamaProvider
+from .llm import get_provider
 from .store import TaskStore
 
 
@@ -20,7 +20,7 @@ def build_system_prompt(agent) -> str:
 
 def run_task(task_id: str, store=None, provider=None) -> list[dict]:
     store = store or TaskStore()
-    provider = provider or OllamaProvider()
+    provider = provider or get_provider()
     task = store.get_task(task_id)
     if task is None:
         raise KeyError(f"Task not found: {task_id}")
