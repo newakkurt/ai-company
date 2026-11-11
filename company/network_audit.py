@@ -126,7 +126,7 @@ def audit_config(config: str, vendor: str | None = None) -> AuditResult:
     undocumented = []
     for name, body in blocks:
         if not any(re.match(r"^description\s+\S+", item, re.I) for item in body):
-            if not any(re.match(r"^(shutdown|undo shutdown)$", item, re.I) for item in body):
+            if not any(re.match(r"^shutdown$", item, re.I) for item in body):
                 undocumented.append(f"interface {name}")
     if undocumented:
         findings.append(Finding(
