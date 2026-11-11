@@ -35,6 +35,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_DB_GATE_KEY: ${{ secrets.SUPABASE_DB_GATE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           python - <<'PY'
           import os
@@ -44,9 +45,10 @@ jobs:
               "SUPABASE_URL",
               "SUPABASE_ANON_KEY",
               "SUPABASE_DB_GATE_KEY",
-              "GEMINI_API_KEY",
           )
           missing = [key for key in required if not os.getenv(key)]
+          if not (os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY")):
+              missing.append("GEMINI_API_KEY or GROQ_API_KEY")
           ready = not missing
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"ready={'true' if ready else 'false'}\n")
@@ -63,7 +65,9 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_DB_GATE_KEY: ${{ secrets.SUPABASE_DB_GATE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           AI_COMPANY_GEMINI_MODEL: gemini-3.5-flash-lite
+          GROQ_MODEL: llama-3.1-8b-instant
         run: python -m company.worker --once
 
       - name: Report idle or waiting state
