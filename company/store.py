@@ -168,7 +168,7 @@ class SupabaseTaskStore:
         self._event(task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
         return task_id
 
-    def requeue_stale_tasks(self, stale_minutes: int = 60):
+    def requeue_stale_tasks(self, stale_minutes: int = 5):
         """Recover interrupted dry-run tasks after a quiet lease window."""
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
         rows = self._request("tasks", params={
