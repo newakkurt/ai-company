@@ -101,6 +101,30 @@ def notify_due_followups(store=None, now=None):
     return sent
 
 
+def _start_task_heartbeat(store, task_id: str, interval_seconds: int = 60):
+    """Refresh the task's quiet lease while a long LLM run is still active."""
+    heartbeat = getattr(store, "heartbeat_task", None)
+    if not callable(heartbeat):
+        return None, None
+    stop_event = threading.Event()
+
+    def run():
+        while not stop_event.wait(interval_seconds):
+            try:
+                if not heartbeat(task_id):
+                    print(f"agent_worker: task lease no longer owned; task_id={task_id}", flush=True)
+                    return
+            except Exception as exc:  # noqa: BLE001 - heartbeat failures are visible but isolated
+                print(f"agent_worker: heartbeat failed; task_id={task_id}; error_type={type(exc).__name__}",
+                      file=sys.stderr, flush=True)
+
+    thread = threading.Thread(
+        target=run, name=f"ai-company-heartbeat-{task_id}", daemon=True
+    )
+    thread.start()
+    return stop_event, thread
+
+
 def process_one_task(store=None, provider=None):
     """Claim and execute at most one dry-run task, persisting every agent result."""
     store = store or TaskStore()
@@ -109,6 +133,7 @@ def process_one_task(store=None, provider=None):
         return {"status": "idle"}
 
     print(f"agent_worker: claimed task {task_id}", flush=True)
+    heartbeat_stop, heartbeat_thread = _start_task_heartbeat(store, task_id)
     try:
         results = run_task(task_id, store=store, provider=provider)
         # Save research leads only when the model emits the requested JSON block
@@ -207,6 +232,11 @@ def process_one_task(store=None, provider=None):
             "task_id": task_id,
             "error_type": type(exc).__name__,
         }
+    finally:
+        if heartbeat_stop:
+            heartbeat_stop.set()
+        if heartbeat_thread and heartbeat_thread.is_alive():
+            heartbeat_thread.join(timeout=3)
 
 
 def run_forever(stop_event=None, poll_seconds: int = 15):
