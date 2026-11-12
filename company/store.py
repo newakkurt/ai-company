@@ -380,6 +380,19 @@ class SupabaseTaskStore:
         })
         return {"created": False, "entitlement": existing[0] if existing else None}
 
+    def get_product_entitlement_by_subscription(self, subscription_id: str):
+        rows = self._request("product_entitlements", params={
+            "select": "*", "subscription_id": f"eq.{subscription_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
+    def get_product_download_token_for_entitlement(self, entitlement_id: str):
+        rows = self._request("product_download_tokens", params={
+            "select": "token_hash,status,download_count,max_downloads,expires_at",
+            "entitlement_id": f"eq.{entitlement_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
     def get_product_entitlement(self, entitlement_id: str):
         rows = self._request("product_entitlements", params={
             "select": "*", "entitlement_id": f"eq.{entitlement_id}", "limit": "1",
@@ -1006,6 +1019,21 @@ class TaskStore:
             row = db.execute("SELECT * FROM product_entitlements WHERE subscription_id=?",
                              (subscription_id,)).fetchone()
         return {"created": False, "entitlement": dict(row) if row else None}
+
+    def get_product_entitlement_by_subscription(self, subscription_id: str):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM product_entitlements WHERE subscription_id=?",
+                             (subscription_id,)).fetchone()
+        return dict(row) if row else None
+
+    def get_product_download_token_for_entitlement(self, entitlement_id: str):
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT token_hash,status,download_count,max_downloads,expires_at
+                   FROM product_download_tokens WHERE entitlement_id=?""",
+                (entitlement_id,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def get_product_entitlement(self, entitlement_id: str):
         with self._connect() as db:
