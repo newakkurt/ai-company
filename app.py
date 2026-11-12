@@ -910,3 +910,82 @@ def crm_research(country: str = "both"):
     }]
     store.assign_agents(task["task_id"], agents)
     return {"task_id":task["task_id"],"status":"queued","assigned_agents":agents}
+
+
+# --- Marketing workspace -------------------------------------------------------------
+class MarketingTaskInput(BaseModel):
+    channel: str = Field(pattern="^(seo|linkedin|youtube|instagram|telegram|visual|email|conversion|opportunity)$")
+    objective: str = Field(min_length=8, max_length=600)
+    audience: str = Field(default="Network engineers, IT managers, MSPs and system integrators", max_length=300)
+    language: str = Field(default="tr+en", pattern="^(tr|en|tr\\+en)$")
+
+
+_MARKETING_CHANNELS = {
+    "seo": ("SEO article", ["marketing_growth", "content_communications", "research_intelligence", "network_infrastructure", "qa_testing"]),
+    "linkedin": ("LinkedIn post", ["marketing_growth", "content_communications", "network_infrastructure", "qa_testing"]),
+    "youtube": ("YouTube video package", ["marketing_growth", "content_communications", "network_infrastructure", "qa_testing"]),
+    "instagram": ("Instagram carousel/Reel", ["marketing_growth", "content_communications", "network_infrastructure"]),
+    "telegram": ("Telegram announcement", ["marketing_growth", "content_communications", "product_business"]),
+    "visual": ("Product promotional visual brief", ["marketing_growth", "content_communications", "technology_architect", "qa_testing"]),
+    "email": ("Permission-based email campaign", ["marketing_growth", "content_communications", "product_business", "security_compliance"]),
+    "conversion": ("Marketing conversion analysis", ["data_analytics", "marketing_growth", "product_business", "finance_revenue_ops"]),
+    "opportunity": ("Market opportunity research", ["research_intelligence", "marketing_growth", "product_business", "data_analytics"]),
+}
+
+
+@app.get("/marketing")
+def marketing_dashboard():
+    return FileResponse(WEB_DIR / "marketing.html")
+
+
+@app.get("/api/marketing/status", dependencies=[Depends(require_api_key)])
+def marketing_status():
+    tasks = [t for t in store.list_tasks(100) if str(t.get("task_id", "")).startswith(("auto-marketing-", "marketing-"))]
+    counts = {"planned": 0, "running": 0, "completed": 0, "failed": 0}
+    for task in tasks:
+        status = task.get("status")
+        if status in counts:
+            counts[status] += 1
+    return {
+        "enabled": auto_tasks_enabled(),
+        "worker": worker_status(),
+        "provider": provider_status(),
+        "scheduled_playbooks": ["SEO", "LinkedIn", "YouTube", "Instagram", "Telegram", "visual briefs", "email", "conversion analysis", "weekly growth opportunities"],
+        "publishing_integrations": {"linkedin": False, "youtube": False, "instagram": False, "telegram": services_status()["telegram"]["running"], "email": services_status()["mail"]["running"]},
+        "publishing_mode": "draft_only_requires_owner_approval",
+        "counts": counts,
+        "recent_tasks": tasks[:30],
+    }
+
+
+@app.get("/api/marketing/tasks/{task_id}", dependencies=[Depends(require_api_key)])
+def marketing_task_detail(task_id: str):
+    if not task_id.startswith(("auto-marketing-", "marketing-")):
+        raise HTTPException(status_code=404, detail="Marketing task not found")
+    task = store.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Marketing task not found")
+    return task
+
+
+@app.post("/api/marketing/campaign", dependencies=[Depends(require_api_key)])
+def create_marketing_campaign(payload: MarketingTaskInput):
+    title, agents = _MARKETING_CHANNELS[payload.channel]
+    task_id = "marketing-" + uuid.uuid4().hex[:12]
+    description = (
+        f"MARKETING CAMPAIGN: {title}\\nProduct: NetCmd PRO ($69/month target price; treat as a hypothesis, not validated willingness to pay).\\n"
+        f"Objective: {payload.objective}\\nAudience: {payload.audience}\\nLanguages: {payload.language}.\\n"
+        "Create a complete, publish-ready draft with headline/hook, body/script, CTA to https://netcmd-site.onrender.com/en/, "
+        "source URLs for factual claims, accessibility notes and measurable success KPI. "
+        "Use only verified product capabilities. No fabricated customer proof, metrics, endorsements or guarantees. "
+        "For email, require a documented lawful basis/consent and unsubscribe. Draft only: do not publish, send, spend or contact anyone."
+    )
+    store.create_task(description, task_id=task_id)
+    store.assign_agents(task_id, ["ceo", *agents])
+    return {"ok": True, "task_id": task_id, "status": "planned", "execution": "draft_only", "assigned_agents": agents}
+
+
+@app.get("/api/marketing/tasks", dependencies=[Depends(require_api_key)])
+def list_marketing_tasks(limit: int = 50):
+    tasks = [t for t in store.list_tasks(max(1, min(limit, 100))) if str(t.get("task_id", "")).startswith(("auto-marketing-", "marketing-"))]
+    return {"tasks": tasks}
