@@ -28,7 +28,7 @@ from company.notifier import (
 )
 from company.scheduler import auto_tasks_enabled
 from company.store import TaskStore
-from company.worker import run_forever
+from company.worker import run_supervised, supervisor_status
 
 ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "web"
@@ -50,6 +50,7 @@ def worker_status() -> dict[str, Any]:
         "running": running,
         "mode": "embedded_supabase_poll" if enabled else "disabled",
         "poll_seconds": _WORKER_POLL_SECONDS,
+        **supervisor_status(),
     }
 
 
@@ -71,7 +72,7 @@ def start_embedded_worker() -> None:
             return
         _worker_stop_event.clear()
         _worker_thread = threading.Thread(
-            target=run_forever,
+            target=run_supervised,
             kwargs={"stop_event": _worker_stop_event, "poll_seconds": _WORKER_POLL_SECONDS},
             name="ai-company-agent-worker",
             daemon=True,
