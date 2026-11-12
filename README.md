@@ -114,6 +114,7 @@ Bu sürüm FastAPI tabanlı bir panel ve korumalı görev API'si içerir:
 NetCmd projesi/veritabanı kullanılmaz. Supabase Free projeleri 500 MB veritabanı kotası ve düşük aktivitede otomatik duraklatma sınırlamalarına tabidir.
 
 ## Dokümantasyon
+- [NetCmd PRO satış, Buy Me a Coffee webhook ve banka mutabakatı](docs/SALES_AND_BILLING.md)
 - [14 ajan işletim modeli](docs/AGENTS.md)
 - [Mimari](docs/ARCHITECTURE.md)
 - [Güvenlik](docs/SECURITY.md)
