@@ -2,9 +2,7 @@
 
 ## Offer and BMC mapping
 
-The application supports multiple Buy Me a Coffee membership levels. Do not assume one fixed price or reuse an unverified level ID.
-
-Configure `BMC_PRODUCT_LEVEL_MAP` as a JSON object in Render. Each BMC membership level maps to one exact product release and exact USD price:
+The five Shop products are BMC Shop Extras, not membership tiers. For these products, configure `BMC_EXTRA_PRODUCT_MAP` in Render. Each key is the Shop item's `extras[].id` from the webhook payload, mapped to one exact product release and USD unit price:
 
 ```json
 {
@@ -17,8 +15,7 @@ Configure `BMC_PRODUCT_LEVEL_MAP` as a JSON object in Render. Each BMC membershi
 }
 ```
 
-The legacy `BMC_PRO_MEMBERSHIP_LEVEL_ID`, `BMC_PRO_PRODUCT_ID`, and `BMC_PRO_PRICE_USD` settings remain available for a single tier.
-
+`BMC_PRODUCT_LEVEL_MAP` and the legacy `BMC_PRO_MEMBERSHIP_LEVEL_ID` / `BMC_PRO_PRODUCT_ID` / `BMC_PRO_PRICE_USD` settings remain available for membership tiers only.
 ## Publish a product before selling it
 
 Generated releases are stored with status `review_required`. They cannot be downloaded by buyers until the owner:
@@ -38,8 +35,7 @@ Configure:
 - `APP_PUBLIC_URL)
 - BMC webhook endpoint: `https://ai-company-ferd.onrender.com/webhooks/buymeacoffee)
 
-The application verifies the raw webhook body using HMAC-SHA256 and the `x-signature-sha256` header. Provider event keys are deduplicated. Membership start creates a financial ledger event; an update is treated as a new payment only when the billing-cycle start changes. Cancellation, pause and refund events update access status.
-
+The application verifies the raw webhook body using HMAC-SHA256 and the `x-signature-sha256` header. For Shop products, `extra_purchase.created` creates one ledger line and entitlement per mapped Shop item; `extra_purchase.updated` does not create a second sale; `extra_purchase.refunded` revokes the matching entitlement. Membership start creates a financial ledger event; an update is treated as a new payment only when the billing-cycle start changes. Cancellation, pause and refund events update membership access.
 Ledger values are provider event amounts and estimated fees; they are not a confirmed payout or bank deposit. The BMC dashboard and bank statement remain the source of truth for settlement.
 
 ## Buyer delivery
