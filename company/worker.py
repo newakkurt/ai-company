@@ -13,6 +13,7 @@ from .agent_runner import run_task
 from .llm import get_provider
 from .product_factory import build_product
 from .crm import upsert_company as crm_upsert_company
+from .source_verification import verify_public_source
 from .notifier import notify_owner, notify_task_failed, notify_task_result
 from .scheduler import seed_due_tasks
 from .store import TaskStore
@@ -134,6 +135,12 @@ def process_one_task(store=None, provider=None):
                         continue
                     if len(str(lead.get("source_name", "")).strip()) < 2:
                         continue
+                    verification = verify_public_source(source_url, str(lead.get("company_name", "")))
+                    if verification["source_validation_status"] in {"unsafe_url", "unreachable", "too_large", "redirect_limit"}:
+                        print("crm: prospect source rejected; status=" +
+                              verification["source_validation_status"], flush=True)
+                        continue
+                    lead.update(verification)
                     lead["source_type"] = "agent_research_unverified"
                     try:
                         crm_upsert_company(lead, store=store)
