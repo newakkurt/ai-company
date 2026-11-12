@@ -9,8 +9,9 @@ import re
 from typing import Iterable
 
 SECRET_PATTERNS = (
+    re.compile(r"(?i)(\bsnmp-agent\s+community\s+(?:read|write)\s+(?:cipher|simple)\s+)(\S+)"),
     re.compile(r"(?i)(\b(?:password|passwd|secret|community|authentication-key|privacy-key|key-string)\s+(?:\d+\s+)?)(\S+)"),
-    re.compile(r"(?i)(\b(?:snmp-server\s+community|snmp-agent\s+community)\s+(?:read|write)\s+)(\S+)"),
+    re.compile(r"(?i)(\b(?:snmp-server\s+community)\s+)(\S+)"),
     re.compile(r"(?i)(\b(?:pre-shared-key|psk)\s+)(\S+)"),
 )
 NEGATIVE_PREFIXES = ("undo ", "no ", "disable ")
