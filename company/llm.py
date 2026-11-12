@@ -177,7 +177,7 @@ class GroqAPIError(RuntimeError):
 class GroqProvider:
     """OpenAI-compatible Groq provider, enabled only when GROQ_API_KEY is configured."""
 
-    DEFAULT_MODEL = "llama-3.1-8b-instant"
+    DEFAULT_MODEL = "openai/gpt-oss-20b"
     ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
     def __init__(self, api_key=None, model=None, timeout=45):
