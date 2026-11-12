@@ -66,7 +66,7 @@ AI_COMPANY_EMBEDDED_TELEGRAM=false
 1. Haftalık factory bir ZIP üretir; Supabase'e checksum ile kaydeder, durum `review_required`.
 2. Sahip ürünü inceler ve `publish_product) için product_id + SHA-256 kapsamlı onay verir.
 3. Onay sonrası `POST /api/factory/products/{product_id}/publish) ürünü satışa hazır yapar.
-4. BMC Shop item ID (`extras[].id`), ürün ID ve fiyat `BMC_EXTRA_PRODUCT_MAP) ile eşleştirilir.
+4. BMC Shop item ID (`extras[].id`), ürün ID ve fiyat `BMC_EXTRA_PRODUCT_MAP ile eşleştirilir.
 5. İmzalı live webhook ödeme ledger'ına yazılır ve entitlement oluşturur.
 6. Ürün yayınlanmış ve SMTP hazırsa alıcıya 7 gün / 5 indirme limitli link gönderilir. SMTP yoksa sahibine manuel teslimat linki gönderilir.
 7. Ürün henüz yayınlanmamışsa entitlement pending kalır; yayın sonrası `POST /api/payments/entitlements/{subscription_id}/deliver) çağrılır.
