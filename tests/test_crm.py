@@ -78,7 +78,7 @@ class CRMTests(unittest.TestCase):
         store=FakeStore()
         list_companies(store, query="Acme),status.eq.failed,or(id.gt.0)")
         params=store.calls[-1][2]
-        self.assertEqual(params["or"], "(company_name.ilike.*Acme statuseqfailedorgt0*,country.ilike.*Acme statuseqfailedorgt0*,industry.ilike.*Acme statuseqfailedorgt0*)")
+        self.assertEqual(params["or"], "(company_name.ilike.*Acme statuseqfailedoridgt0*,country.ilike.*Acme statuseqfailedoridgt0*,industry.ilike.*Acme statuseqfailedoridgt0*)")
 
     def test_inbound_unsubscribe_creates_suppression(self):
         store=FakeStore()
