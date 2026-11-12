@@ -576,6 +576,8 @@ def payments_summary(months: int = 12):
         for row in rows:
             totals[str(row.get("currency","USD")).upper()] += Decimal(str(row.get(key,0)))
         return {cur:str(val.quantize(Decimal("0.01"))) for cur,val in totals.items()}
+    paid_payouts = [p for p in payouts if str(p.get("status","")).lower() == "paid"]
+    recent_months = set(sorted({k.split("|",1)[0] for k in monthly})[-months:])
     return {
         "currency_note":"All totals are separated by currency; currencies are never added together.",
         "ledger_entries":len(ledger),
@@ -585,12 +587,12 @@ def payments_summary(months: int = 12):
         "platform_fees_recorded_or_estimated":by_currency(ledger,"platform_fee_amount"),
         "processing_fees_estimated":by_currency(ledger,"processing_fee_estimate"),
         "provider_payouts":payouts,
-        "provider_payout_total":by_currency(payouts,"amount"),
+        "provider_payout_total_paid":by_currency(paid_payouts,"amount"),
         "bank_settlements":settlements,
         "bank_received_total":by_currency(settlements,"amount"),
         "monthly":[{"month":k.split("|",1)[0],"currency":k.split("|",1)[1],
                     **{n:(str(v) if isinstance(v,Decimal) else v) for n,v in val.items()}}
-                   for k,val in sorted(monthly.items())[-months:]],
+                   for k,val in sorted(monthly.items()) if k.split("|",1)[0] in recent_months],
         "reconciliation":"Provider payouts and bank settlements are separate manual/provider records; bank receipt is never inferred from a sale webhook."
     }
 
