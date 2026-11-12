@@ -184,8 +184,8 @@ def authentication_passed(parsed: dict, cfg: MailConfig) -> bool:
         return False
     lower = first.lower()
     return bool(
-        re.search(r"\\bdmarc=pass\\b", lower)
-        and (re.search(r"\\bspf=pass\\b", lower) or re.search(r"\\bdkim=pass\\b", lower))
+        re.search(r"\bdmarc=pass\b", lower)
+        and (re.search(r"\bspf=pass\b", lower) or re.search(r"\bdkim=pass\b", lower))
     )
 
 
@@ -293,16 +293,6 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
                 continue
             verdict = classify(parsed, own)
 
-            if cfg.mode == "auto_reply" and not authentication_passed(parsed, cfg):
-                imap.store(num, "+FLAGS", "\\Flagged")
-                stats["escalated"] += 1
-                notifier(
-                    "⚠️ Otomatik yanıt güvenlik kontrolünde durduruldu. SPF/DKIM/DMARC doğrulaması "
-                    "gerekli.\n"
-                    f"Kimden: {parsed['from']}\nKonu: {parsed['subject']}"
-                )
-                continue
-
             if verdict == "skip":
                 imap.store(num, "+FLAGS", "\\Seen")
                 stats["skipped"] += 1
@@ -312,6 +302,16 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
                 stats["escalated"] += 1
                 notifier(
                     "📨 Mail sizin ilginizi gerektiriyor (hassas konu; otomatik cevap verilmedi)\n"
+                    f"Kimden: {parsed['from']}\nKonu: {parsed['subject']}"
+                )
+                continue
+
+            if cfg.mode == "auto_reply" and not authentication_passed(parsed, cfg):
+                imap.store(num, "+FLAGS", "\\Flagged")
+                stats["escalated"] += 1
+                notifier(
+                    "⚠️ Otomatik yanıt güvenlik kontrolünde durduruldu. SPF/DKIM/DMARC doğrulaması "
+                    "gerekli.\n"
                     f"Kimden: {parsed['from']}\nKonu: {parsed['subject']}"
                 )
                 continue
@@ -338,7 +338,7 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
                 try:
                     from .crm import record_mail
                     record_mail(parsed["from"], "outbound", parsed["subject"], body,
-                                parsed["message_id"], parsed["references"])
+                                parsed["message_id"], parsed["references"], store=store)
                 except Exception:
                     pass
                 notifier(
