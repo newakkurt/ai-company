@@ -144,8 +144,9 @@ class SchedulerTests(unittest.TestCase):
                 ((now - timedelta(minutes=45)).isoformat(), task_id),
             )
         # Existing tasks may already have used both ordinary retries before the quota failure.
-        self.store._event(task_id, "agent_task_retried", "scheduler", {"attempt": 1, "max_retries": 2})
-        self.store._event(task_id, "agent_task_retried", "scheduler", {"attempt": 2, "max_retries": 2})
+        with self.store._connect() as db:
+            self.store._event(db, task_id, "agent_task_retried", "scheduler", {"attempt": 1, "max_retries": 2})
+            self.store._event(db, task_id, "agent_task_retried", "scheduler", {"attempt": 2, "max_retries": 2})
         with patch.dict(os.environ, {"GROQ_API_KEY": "test-groq-key"}):
             scheduler.seed_due_tasks(self.store, now=now)
         self.assertEqual(self.store.get_task(task_id)["status"], "planned")
