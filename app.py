@@ -426,7 +426,6 @@ def private_health():
     return {"ok": True, "provider": provider_status(), "agent_count": len(load_agents()), "worker": worker_status()}
 
 # --- Digital product factory ---------------------------------------------------------
-from fastapi import BackgroundTasks
 from fastapi.responses import FileResponse as DownloadFileResponse
 from company.product_factory import (
     build_product, create_research_task, product_metadata, product_zip_path, score_idea,
