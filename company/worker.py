@@ -1,5 +1,7 @@
 """Durable, analysis-only task consumer for Supabase-backed agent work."""
 import argparse
+import json
+import re
 import os
 import signal
 import sys
@@ -9,6 +11,7 @@ import time
 from .agent_runner import run_task
 from .llm import get_provider
 from .product_factory import build_product
+from .crm import upsert_company as crm_upsert_company
 from .notifier import notify_task_failed, notify_task_result
 from .scheduler import seed_due_tasks
 from .store import TaskStore
@@ -74,6 +77,32 @@ def process_one_task(store=None, provider=None):
     print(f"agent_worker: claimed task {task_id}", flush=True)
     try:
         results = run_task(task_id, store=store, provider=provider)
+        # Save research leads only when the model emits the requested JSON block
+        # and provides a public HTTPS source. Records remain unverified drafts.
+        if task_id.startswith(("auto-prospects-", "crm-research-")):
+            for item in results:
+                output = item.get("output", "")
+                match = re.search(r"CRM_LEADS_JSON\\s*[:=]\\s*(\\[.*?\\])", output, re.I | re.S)
+                if not match:
+                    continue
+                try:
+                    leads = json.loads(match.group(1))
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(leads, list):
+                    continue
+                for lead in leads[:10]:
+                    if not isinstance(lead, dict):
+                        continue
+                    source_url = str(lead.get("source_url", "")).strip()
+                    if not source_url.startswith("https://") or "example.invalid" in source_url:
+                        continue
+                    if len(str(lead.get("company_name", "")).strip()) < 2:
+                        continue
+                    if len(str(lead.get("source_name", "")).strip()) < 2:
+                        continue
+                    lead["source_type"] = "agent_research_unverified"
+                    crm_upsert_company(lead, store=store)
         if task_id.startswith("auto-digital-product-factory-"):
             research_context = "\n\n".join(
                 f"[{item['agent_id']}]\n{item['output']}" for item in results
