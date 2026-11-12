@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from .agents import load_agents
+from .dead_letter import archive_if_exhausted
 
 # Turkey has no DST (fixed UTC+3 since 2016); avoids a tzdata dependency on Windows.
 TR_TZ = timezone(timedelta(hours=3))
@@ -119,7 +120,11 @@ def seed_due_tasks(store, now: datetime | None = None) -> list[str]:
             created.append(task_id)
         elif existing["status"] == "failed":
             # Bounded: at most 2 retries, spaced 30 min apart, resumes from saved outputs.
-            store.requeue_failed_task(task_id, max_retries=2, min_age_minutes=30)
+            requeued = store.requeue_failed_task(task_id, max_retries=2, min_age_minutes=30)
+            if not requeued:
+                # Once the retry budget is exhausted, preserve the complete task
+                # snapshot for inspection instead of retrying forever.
+                archive_if_exhausted(store, task_id, max_retries=2, min_age_minutes=30)
     if created:
         print(f"scheduler: seeded {len(created)} task(s): {', '.join(created)}", flush=True)
     return created
