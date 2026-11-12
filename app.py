@@ -383,8 +383,15 @@ def _verify_bmc_signature(raw_body: bytes, secret: str, signature: str) -> bool:
 
 
 def _iso_timestamp(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
     try:
-        return datetime.fromtimestamp(int(value), tz=timezone.utc).isoformat() if value else None
+        if isinstance(value, (int, float)) or str(value).strip().isdigit():
+            return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
     except (TypeError, ValueError, OverflowError):
         return None
 
