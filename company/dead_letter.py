@@ -45,6 +45,11 @@ def archive_if_exhausted(store, task_id: str, max_retries: int = 2,
     }
 
     if hasattr(store, "_request"):  # hosted Supabase store
+        existing = store._request("dead_letter_tasks", params={
+            "select": "task_id", "task_id": f"eq.{task_id}", "limit": "1",
+        })
+        if existing:
+            return False
         store._request("dead_letter_tasks", "POST",
                        {"on_conflict": "task_id"}, payload,
                        "resolution=ignore-duplicates,return=minimal")
@@ -58,7 +63,11 @@ def archive_if_exhausted(store, task_id: str, max_retries: int = 2,
                 last_error TEXT NOT NULL, task_snapshot TEXT NOT NULL,
                 archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )""")
-            db.execute("""INSERT OR IGNORE INTO dead_letter_tasks
+            existing = db.execute("SELECT 1 FROM dead_letter_tasks WHERE task_id=?",
+                                  (task_id,)).fetchone()
+            if existing:
+                return False
+            db.execute("""INSERT INTO dead_letter_tasks
                 (task_id, description, retry_count, last_error, task_snapshot)
                 VALUES (?, ?, ?, ?, ?)""",
                 (task_id, payload["description"], retries,
