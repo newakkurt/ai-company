@@ -47,7 +47,9 @@ class FactoryWorkerTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(store.saved[0], "product_factory")
         self.assertEqual(store.release_saved, ("prd-012345abcdef", b"fake-zip"))
-        self.assertEqual(json.loads(store.saved[1].split("):\n", 1)[-1]), release)
+        expected_metadata = {k: v for k, v in release.items()
+                             if k not in {"download_path", "checksum_path", "backup_path"}}
+        self.assertEqual(json.loads(store.saved[1].split("):\n", 1)[-1]), expected_metadata)
         self.assertEqual(store.completed, 2)
 
 
