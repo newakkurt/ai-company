@@ -2,7 +2,7 @@
 
 ## Offer and BMC mapping
 
-The five Shop products are BMC Shop Extras, not membership tiers. For these products, configure `BMC_EXTRA_PRODUCT_MAP` in Render. Each key is the Shop item's `extras[].id` from the webhook payload, mapped to one exact product release and USD unit price:
+If the five products are listed in BMC under Shop, configure `BMC_EXTRA_PRODUCT_MAP` in Render. Each key is the Shop item's `extras[].id` from the webhook payload, mapped to one exact product release and USD unit price:
 
 ```json
 {
@@ -15,7 +15,7 @@ The five Shop products are BMC Shop Extras, not membership tiers. For these prod
 }
 ```
 
-`BMC_PRODUCT_LEVEL_MAP` and the legacy `BMC_PRO_MEMBERSHIP_LEVEL_ID` / `BMC_PRO_PRODUCT_ID` / `BMC_PRO_PRICE_USD` settings remain available for membership tiers only.
+If those items are membership tiers instead, use `BMC_PRODUCT_LEVEL_MAP`; the legacy `BMC_PRO_MEMBERSHIP_LEVEL_ID` / `BMC_PRO_PRODUCT_ID` / `BMC_PRO_PRICE_USD` settings remain available for a single membership tier.
 ## Publish a product before selling it
 
 Generated releases are stored with status `review_required`. They cannot be downloaded by buyers until the owner:
