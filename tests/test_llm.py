@@ -165,3 +165,42 @@ class GeminiProviderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FallbackSearchTests(unittest.TestCase):
+    def test_search_fallback_is_explicitly_unverified(self):
+        class Primary:
+            def generate(self, *_args, **_kwargs):
+                raise GeminiAPIError("Gemini API returned HTTP 429; quota exhausted")
+
+        class Fallback:
+            def __init__(self):
+                self.prompts = None
+
+            def generate(self, system_prompt, user_prompt):
+                self.prompts = (system_prompt, user_prompt)
+                return "Search terms and evidence checklist."
+
+        fallback = Fallback()
+        provider = FallbackProvider(Primary(), fallback)
+        output = provider.generate("research role", "find MSP prospects", use_search=True)
+
+        self.assertIn("UNVERIFIED", output)
+        self.assertIn("NO WEB SEARCH WAS PERFORMED", output)
+        self.assertIn("Do not invent real companies", fallback.prompts[0])
+        self.assertIn("do not claim that research was completed", fallback.prompts[1])
+
+    def test_non_search_fallback_keeps_normal_prompt(self):
+        class Primary:
+            def generate(self, *_args, **_kwargs):
+                raise GeminiAPIError("Gemini API returned HTTP 429; quota exhausted")
+
+        class Fallback:
+            def generate(self, system_prompt, user_prompt):
+                self.prompts = (system_prompt, user_prompt)
+                return "fallback"
+
+        fallback = Fallback()
+        output = FallbackProvider(Primary(), fallback).generate("system", "user")
+        self.assertEqual(output, "fallback")
+        self.assertEqual(fallback.prompts, ("system", "user"))
