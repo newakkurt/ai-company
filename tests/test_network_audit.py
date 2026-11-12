@@ -98,7 +98,7 @@ interface GigabitEthernet1/0/1
                          "security.port_security","security.bpdu_protection","security.dhcp_snooping"}.isdisjoint(ids))
 
     def test_renderers_are_deterministic_and_escape_html(self):
-        result=audit_config('hostname <script>alert("x")</script>')
+        result=audit_config('hostname EDGE-CS-99\nline vty 0 4\n transport input telnet ssh <script>alert("x")</script>\n!')
         self.assertEqual(result.render_markdown(),result.render_markdown())
         self.assertIn("&lt;script&gt;",result.render_html())
         self.assertNotIn("<script>",result.render_html())
