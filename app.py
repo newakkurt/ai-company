@@ -834,7 +834,7 @@ from company.crm import (
     upsert_contact as crm_upsert_contact, create_offer as crm_create_offer,
     suppress_contact as crm_suppress_contact, list_followups as crm_list_followups,
     record_mail as crm_record_mail, list_contacts as crm_list_contacts,
-    update_company_stage as crm_update_company_stage,
+    update_company_stage as crm_update_company_stage, verify_company as crm_verify_company,
 )
 
 class CRMCompanyInput(BaseModel):
@@ -890,8 +890,9 @@ def crm_status():
     return {
         "enabled": True,
         "database": "supabase" if database_status()["backend"] == "supabase" else "sqlite",
-        "pipeline": ["TR+global research", "lead dedupe", "evidence capture", "fit scoring",
-                     "needs analysis", "personalized proposal", "draft+followup",
+        "pipeline": ["TR+global research", "SSRF-safe public source check", "lead dedupe",
+                     "human source verification", "fit scoring", "needs analysis",
+                     "qualified proposal draft+followup",
                      "inbound classification", "approved-facts replies", "suppression list"],
         "outbound_sending": False, "human_approval_required": True,
         "privacy": "public business sources only; no private personal-data scraping",
@@ -923,6 +924,16 @@ def crm_add_contact(company_id: str, payload: CRMContactInput):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+@app.post("/api/crm/companies/{company_id}/verify", dependencies=[Depends(require_api_key)])
+def crm_verify(company_id: str):
+    try:
+        return crm_verify_company(company_id, store)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Company not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @app.patch("/api/crm/companies/{company_id}/stage", dependencies=[Depends(require_api_key)])
 def crm_set_stage(company_id: str, payload: CRMStageInput):
     try:
@@ -931,6 +942,8 @@ def crm_set_stage(company_id: str, payload: CRMStageInput):
         raise HTTPException(status_code=404, detail="Company not found")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 @app.post("/api/crm/companies/{company_id}/offer", dependencies=[Depends(require_api_key)])
 def crm_offer(company_id: str, product_name: str = "NetCmd PRO"):
