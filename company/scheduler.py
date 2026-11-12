@@ -95,6 +95,51 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         "Report revenue only from records supplied in this task; if none, state that no verified "
         "revenue data was available." + _RULES,
     ),
+    Playbook(
+        "marketing-seo", "daily",
+        ("marketing_growth", "content_communications", "research_intelligence", "network_infrastructure", "qa_testing"),
+        "SEO CONTENT STUDIO for NetCmd PRO. Research real search intent for network automation, multi-vendor network management, switch configuration audit, FortiGate/FortiNAC operations, Huawei/Cisco/Aruba automation. Produce one publish-ready Turkish and English SEO article: primary/secondary keywords, intent, non-fabricated SERP observations with source URLs, title, meta description, H1-H3 outline, 1200-1800 word draft, internal-link suggestions, FAQ, schema.org Article/FAQ JSON-LD, image brief, CTA to https://netcmd-site.onrender.com/en/. Avoid keyword stuffing and unsupported superiority claims." + _RULES,
+    ),
+    Playbook(
+        "marketing-linkedin", "daily",
+        ("marketing_growth", "content_communications", "network_infrastructure", "qa_testing"),
+        "LINKEDIN CONTENT DESK. Create one high-value B2B post for network engineers, IT managers, MSPs and system integrators. Include a strong first-two-line hook, practical technical insight, one example, concise CTA to NetCmd PRO, 3-5 relevant hashtags, Turkish and English versions, suggested carousel outline and alt text. No fake customer stories or results." + _RULES,
+    ),
+    Playbook(
+        "marketing-youtube", "weekly",
+        ("marketing_growth", "content_communications", "network_infrastructure", "qa_testing"),
+        "YOUTUBE STUDIO. Produce one long-form video package and two Shorts repurposed from it: demand-backed topic, audience/problem, title options, thumbnail concept, 6-10 minute script with timestamps, demo sequence using safe synthetic examples only, description, chapters, tags, pinned comment, CTA, Shorts scripts and captions in Turkish and English. Never claim a real demo was run if it was not." + _RULES,
+    ),
+    Playbook(
+        "marketing-instagram", "daily",
+        ("marketing_growth", "content_communications", "network_infrastructure"),
+        "INSTAGRAM CONTENT DESK. Produce one carousel or Reel package for NetCmd PRO: concept, opening hook, 6-8 slide copy OR 30-45 second shot-by-shot Reel script, on-screen captions, post caption, accessible alt text, CTA, 5-8 relevant hashtags and Turkish/English variants. Keep technical claims verifiable; no fabricated customer proof." + _RULES,
+    ),
+    Playbook(
+        "marketing-telegram", "daily",
+        ("marketing_growth", "content_communications", "product_business"),
+        "TELEGRAM ANNOUNCEMENT DESK. Draft one concise Telegram channel announcement that teaches one useful network operations tip and naturally points to NetCmd PRO. Include a short title, readable body, CTA, optional poll question, Turkish and English versions. Do not send it." + _RULES,
+    ),
+    Playbook(
+        "marketing-visual-briefs", "weekly",
+        ("marketing_growth", "content_communications", "technology_architect", "qa_testing"),
+        "PRODUCT PROMO VISUAL FACTORY. Deliver a coordinated visual campaign brief for NetCmd PRO: one 16:9 hero/banner, one 1:1 Instagram square, one 4:5 feed creative, one 9:16 Story/Reel cover, one LinkedIn carousel cover and one YouTube thumbnail. Specify layout, hierarchy, exact short copy, visual metaphor, brand palette, typography direction, safe margins, accessibility/contrast and image-generation prompts. Use accurate product UI only if verified assets exist; otherwise label mockups as illustrative. Do not invent logos, UI screenshots or customer endorsements." + _RULES,
+    ),
+    Playbook(
+        "marketing-email", "weekly",
+        ("marketing_growth", "content_communications", "product_business", "security_compliance"),
+        "EMAIL MARKETING STUDIO. Build one permission-based NetCmd PRO nurture campaign: audience eligibility and consent assumptions, subject/preheader A/B options, useful educational email, product proof limited to verified facts, clear $69/month offer framing, CTA, follow-up variant, segmentation and unsubscribe/footer checklist. Draft only; never send. Never use scraped or unconsented lists; flag KVKK/GDPR/İYS review." + _RULES,
+    ),
+    Playbook(
+        "marketing-conversion-analysis", "weekly",
+        ("data_analytics", "marketing_growth", "product_business", "finance_revenue_ops"),
+        "MARKETING CONVERSION REVIEW. Analyze only available, explicitly supplied analytics, CRM, payment and campaign records. Report funnel stages (visits, signup/leads, qualified leads, trial/demo, checkout, paid, churn/refund), conversion rates only where numerator and denominator exist, channel attribution confidence, drop-offs, cohort observations and 3 prioritized experiments. If tracking integrations/data are absent, list missing metrics and instrumentation plan; never invent traffic, conversion, revenue or CAC." + _RULES,
+    ),
+    Playbook(
+        "marketing-growth-opportunities", "weekly",
+        ("research_intelligence", "marketing_growth", "product_business", "data_analytics", "finance_revenue_ops"),
+        "WEEKLY GROWTH & MARKET OPPORTUNITY REPORT. Research current network automation, MSP, enterprise network management and adjacent B2B software demand in Turkey and globally. Identify 5 evidence-backed opportunities, competitors/alternatives and source URLs; rank by urgency, willingness-to-pay evidence, reachability, build effort, margin potential and risk. Review actual campaign/CRM/payment data if available; separate verified metrics from hypotheses. Finish with one recommended experiment, owner, 7-day actions, KPI and stop/continue threshold." + _RULES,
+    ),
 )
 
 
