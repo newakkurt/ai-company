@@ -6,7 +6,7 @@ The five Shop products are BMC Shop Extras, not membership tiers. For these prod
 
 ```json
 {
-  "LEVEL_ID": {
+  "EXTRA_ID": {
     "product_id": "prd-...",
     "product_code": "netcmd_pro",
     "product_name": "NetCmd PRO",
@@ -23,7 +23,7 @@ Generated releases are stored with status `review_required`. They cannot be down
 2. Creates a `publish_product` approval scoped to the exact `product_id` and `sha256`.
 3. Approves the one-time request.
 4. Calls `POST /api/factory/products/{product_id}/publish` with the approval ID.
-5. Adds the resulting product ID to the BMC level map.
+5. Adds the resulting product ID to the BMC_EXTRA_PRODUCT_MAP.
 
 Full procedure: [Product publishing and delivery](PRODUCT_PUBLISHING_AND_DELIVERY.md).
 
@@ -31,9 +31,9 @@ Full procedure: [Product publishing and delivery](PRODUCT_PUBLISHING_AND_DELIVER
 
 Configure:
 - `BMC_WEBHOOK_SECRET`
-- `BMC_PRODUCT_LEVEL_MAP) or the legacy level variables
-- `APP_PUBLIC_URL)
-- BMC webhook endpoint: `https://ai-company-ferd.onrender.com/webhooks/buymeacoffee)
+- `BMC_PRODUCT_LEVEL_MAP or the legacy level variables
+- `APP_PUBLIC_URL
+- BMC webhook endpoint: `https://ai-company-ferd.onrender.com/webhooks/buymeacoffee
 
 The application verifies the raw webhook body using HMAC-SHA256 and the `x-signature-sha256` header. For Shop products, `extra_purchase.created` creates one ledger line and entitlement per mapped Shop item; `extra_purchase.updated` does not create a second sale; `extra_purchase.refunded` revokes the matching entitlement. Membership start creates a financial ledger event; an update is treated as a new payment only when the billing-cycle start changes. Cancellation, pause and refund events update membership access.
 Ledger values are provider event amounts and estimated fees; they are not a confirmed payout or bank deposit. The BMC dashboard and bank statement remain the source of truth for settlement.
