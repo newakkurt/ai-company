@@ -155,7 +155,6 @@ def process_one_task(store=None, provider=None):
                 version="0.1.0",
                 provider=provider or get_provider(),
             )
-            import json
             store.record_agent_output(
                 task_id, "product_factory",
                 "Generated release metadata (source not executed):\n"

@@ -11,6 +11,10 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "data" / "company.db"
+# A claimed task is considered abandoned after this many quiet minutes. It must
+# comfortably exceed the slowest single LLM call (retries and timeouts included),
+# otherwise a second worker re-claims a task that is still being processed.
+STALE_LEASE_MINUTES = 15
 
 
 def utc_now() -> str:
@@ -124,6 +128,20 @@ class SupabaseTaskStore:
         })
 
     def record_agent_output(self, task_id: str, agent_id: str, output_text: str):
+        """Idempotent per (task, agent): returns False when an output already exists.
+
+        This narrows the race between overlapping workers; a UNIQUE(task_id, agent_id)
+        constraint in the database is still the authoritative guard.
+        """
+        existing = self._request("agent_outputs", params={
+            "select": "output_id", "task_id": f"eq.{task_id}",
+            "agent_id": f"eq.{agent_id}", "limit": "1",
+        })
+        if existing:
+            self._request("assignments", "PATCH", {
+                "task_id": f"eq.{task_id}", "agent_id": f"eq.{agent_id}",
+            }, {"status": "completed"}, "return=minimal")
+            return False
         self._request("agent_outputs", "POST", body={
             "output_id": uuid.uuid4().hex, "task_id": task_id, "agent_id": agent_id,
             "output_text": output_text, "created_at": utc_now(),
@@ -168,7 +186,7 @@ class SupabaseTaskStore:
         self._event(task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
         return task_id
 
-    def requeue_stale_tasks(self, stale_minutes: int = 5):
+    def requeue_stale_tasks(self, stale_minutes: int = STALE_LEASE_MINUTES):
         """Recover interrupted dry-run tasks after a quiet lease window."""
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
         rows = self._request("tasks", params={
@@ -465,9 +483,18 @@ class TaskStore:
             return [dict(row) for row in rows]
 
     def record_agent_output(self, task_id: str, agent_id: str, output_text: str):
+        """Idempotent per (task, agent): returns False when an output already exists."""
         with self._connect() as db:
             if db.execute("SELECT 1 FROM tasks WHERE task_id=?", (task_id,)).fetchone() is None:
                 raise KeyError(f"Task not found: {task_id}")
+            if db.execute(
+                "SELECT 1 FROM agent_outputs WHERE task_id=? AND agent_id=?", (task_id, agent_id)
+            ).fetchone():
+                db.execute(
+                    "UPDATE assignments SET status='completed' WHERE task_id=? AND agent_id=?",
+                    (task_id, agent_id)
+                )
+                return False
             now = utc_now()
             db.execute(
                 "INSERT INTO agent_outputs (output_id, task_id, agent_id, output_text, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -515,7 +542,7 @@ class TaskStore:
             self._event(db, task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
             return task_id
 
-    def requeue_stale_tasks(self, stale_minutes: int = 60):
+    def requeue_stale_tasks(self, stale_minutes: int = STALE_LEASE_MINUTES):
         """Recover interrupted dry-run tasks after a quiet lease window."""
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
         with self._connect() as db:

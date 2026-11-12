@@ -54,6 +54,13 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
         agent = agents.get(assignment["agent_id"])
         if agent is None or agent.id in persisted:
             continue
+        # Another worker may have saved this role since we started (e.g. after a
+        # lease expiry). Re-check right before paying for another LLM call.
+        latest = {item["agent_id"]: item["output_text"] for item in store.list_agent_outputs(task_id)}
+        if agent.id in latest:
+            persisted[agent.id] = latest[agent.id]
+            results.append({"agent_id": agent.id, "output": latest[agent.id]})
+            continue
         specialist_context = ""
         if agent.id == "ceo":
             specialist_context = "\n\nSpecialist analysis (unverified suggestions):\n" + "\n\n".join(

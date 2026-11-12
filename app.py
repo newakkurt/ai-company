@@ -155,7 +155,9 @@ def require_api_key(authorization: str | None = Header(default=None)) -> None:
     if not expected:
         raise HTTPException(status_code=503, detail="AI Company API key is not configured on the server")
     supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
-    if not hmac.compare_digest(supplied, expected):
+    # Compare bytes: compare_digest raises TypeError for non-ASCII str, which
+    # would turn a malformed Authorization header into a 500 instead of a 401.
+    if not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
