@@ -26,7 +26,9 @@ def score_company(data: dict) -> dict:
     signals = {
         "need_fit": 25 if data.get("need_summary") else 0,
         "industry_fit": 15 if data.get("industry") else 0,
-        "source_quality": 15 if data.get("source_url") and data.get("source_name") and data.get("source_type") != "agent_research_unverified" else 0,
+        "source_quality": 15 if data.get("source_url") and data.get("source_name")
+            and data.get("source_validation_status") in ("reachable_match", "reachable_unparsed")
+            and data.get("source_type") == "human_verified" else 0,
         "contactability": 15 if data.get("public_contact_channel") or data.get("business_email") else 0,
         "website": 10 if data.get("website") else 0,
         "country_fit": 10 if data.get("country") and data.get("country") != "Unknown" else 0,
@@ -59,6 +61,11 @@ def upsert_company(data: dict, store=None) -> dict:
         "company_size":data.get("company_size"), "source_name":data.get("source_name") or "unknown",
         "source_url":source_url,
         "source_type":data.get("source_type") or "public_web",
+        "source_validation_status":data.get("source_validation_status") or "not_checked",
+        "source_http_status":data.get("source_http_status"),
+        "source_page_title":data.get("source_page_title"),
+        "source_checked_at":data.get("source_checked_at"),
+        "source_validation_note":data.get("source_validation_note"),
         "public_contact_channel":data.get("public_contact_channel"),
         "business_email":norm_email(data["business_email"]) if data.get("business_email") else None,
         "need_summary":data.get("need_summary"), "fit_reason":data.get("fit_reason"),
@@ -69,6 +76,29 @@ def upsert_company(data: dict, store=None) -> dict:
                 "resolution=merge-duplicates,return=representation")
     rows=db._request("crm_companies",params={"select":"*","company_id":f"eq.{company_id}","limit":"1"})
     return rows[0] if rows else row
+
+
+def verify_company(company_id: str, store=None) -> dict:
+    """Human-confirm a source already checked as reachable; AI reachability alone is not enough."""
+    db = _db(store)
+    rows = db._request("crm_companies", params={
+        "select": "*", "company_id": f"eq.{company_id}", "limit": "1"
+    })
+    if not rows:
+        raise KeyError("Company not found")
+    company = rows[0]
+    if company.get("source_validation_status") not in ("reachable_match", "reachable_unparsed"):
+        raise ValueError("Company source must be reachable and eligible for manual review first")
+    verified = {**company, "source_type": "human_verified"}
+    score = score_company(verified)
+    db._request("crm_companies", "PATCH", {"company_id": f"eq.{company_id}"}, {
+        "source_type": "human_verified", "score": score["score"],
+        "score_breakdown": score["breakdown"], "updated_at": now(),
+    }, "return=minimal")
+    rows = db._request("crm_companies", params={
+        "select": "*", "company_id": f"eq.{company_id}", "limit": "1"
+    })
+    return rows[0] if rows else verified
 
 def list_companies(store=None, limit=100, query="", stage=None):
     params={"select":"*","order":"score.desc,updated_at.desc","limit":str(max(1,min(limit,250)))}
@@ -142,6 +172,8 @@ def create_offer(company_id: str, product_name: str, store=None) -> dict:
     rows=db._request("crm_companies",params={"select":"*","company_id":f"eq.{company_id}","limit":"1"})
     if not rows: raise KeyError("Company not found")
     company=rows[0]
+    if company.get("source_type") != "human_verified" or company.get("stage") not in {"qualified", "proposal", "negotiation"}:
+        raise PermissionError("Only a human-verified, qualified company can receive a proposal draft")
     contact=db._request("crm_contacts",params={"select":"*","company_id":f"eq.{company_id}","limit":"1"})
     c=contact[0] if contact else None
     if c and is_suppressed(c["email"],db): raise PermissionError("Contact is suppressed; proposal email cannot be prepared")
@@ -174,6 +206,10 @@ def update_company_stage(company_id: str, stage: str, store=None):
     allowed={"new","qualified","proposal","negotiation","won","lost","nurture","suppressed"}
     if stage not in allowed: raise ValueError("Invalid CRM stage")
     db=_db(store)
+    current = db._request("crm_companies", params={"select":"*","company_id":f"eq.{company_id}","limit":"1"})
+    if not current: raise KeyError("Company not found")
+    if stage in {"qualified", "proposal", "negotiation", "won"} and current[0].get("source_type") != "human_verified":
+        raise PermissionError("Human verification is required before advancing a company to a sales stage")
     db._request("crm_companies","PATCH",{"company_id":f"eq.{company_id}"},
                 {"stage":stage,"updated_at":now()},"return=minimal")
     rows=db._request("crm_companies",params={"select":"*","company_id":f"eq.{company_id}","limit":"1"})
