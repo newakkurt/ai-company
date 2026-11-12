@@ -46,3 +46,14 @@ This backlog defines measurable release gates. A checkbox is complete only when 
 - AI-generated prospects, claims and product outputs must be evidence-checked before customer contact.
 - The system must never invent revenue, customer commitments, compliance status or bank settlement.
 - Keep an audit record for every approval, outbound message, payment event and release.
+
+
+## Digital product factory implementation note (2026-11-12)
+
+The first bounded factory implementation is exposed at `/api/factory/*`:
+- Research tasks are queued for the research, product, marketing, architecture, network, security and QA roles.
+- Opportunity scoring uses explicit weighted criteria and a security-risk penalty.
+- MVP generation supports Python API, static web app and Python CLI package types.
+- The release bundle includes source, README, product spec, sample data, test plan, QA/security report, changelog, manifest, SHA-256 and a backup ZIP copy.
+- Generated source is never executed by the factory; runtime tests remain unverified and every release requires human review.
+- The current Render Free filesystem is ephemeral. Durable release delivery remains gated on persistent object storage being configured.

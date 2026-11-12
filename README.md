@@ -119,3 +119,21 @@ NetCmd projesi/veritabanı kullanılmaz. Supabase Free projeleri 500 MB veritaba
 - [Güvenlik](docs/SECURITY.md)
 - [Yol haritası](docs/ROADMAP.md)
 - [Sahip delegasyonu ve otonom çalışma modeli](docs/OWNER_DELEGATION_AND_AUTONOMY.md)
+
+
+## Dijital ürün fabrikası
+
+Yönetim API'si üzerinden ürün fabrikası uçları:
+- `GET /api/factory/status`: pipeline ve güvenlik sınırları.
+- `POST /api/factory/research`: 14 rol içinden araştırma, ürün, pazarlama, mimari, network, güvenlik ve QA rollerine kanıtlı pazar araştırması görevi açar.
+- `POST /api/factory/score`: 7 ölçütlü, ağırlıkları açık 0-100 fırsat puanı ve güvenlik riski cezası.
+- `POST /api/factory/build`: Python API, web uygulaması veya Python CLI MVP kaynakları, README, örnek veri, test planı, QA/güvenlik raporu ve sürümlü ZIP üretir.
+- `GET /api/factory/products/{product_id}`: sürüm manifesti ve kalite özeti.
+- `GET /api/factory/products/{product_id}/download`: ZIP teslimi.
+
+Tüm uçlar `Authorization: Bearer <AI_COMPANY_API_KEY>` gerektirir. Örnek:
+```json
+{"name":"NetOps Mini Audit","description":"Küçük MSP ekipleri için çok üreticili switch envanteri ve salt-okunur konfigürasyon denetimi MVP'si","product_type":"python_api","version":"0.1.0"}
+```
+
+**Güvenlik ve teslimat notları:** Üretilen kaynak kod hiçbir zaman worker içinde çalıştırılmaz. Dosya yolu/uzantısı/boyutu ve gömülü sırlar doğrulanır; Python sözdizimi AST ile kontrol edilir; riskli kalıplar uyarı üretir. Bunlar tam runtime testi veya güvenlik sertifikası değildir. Her sürüm için SHA-256 ve yerel yedek ZIP oluşturulur. Render Free dosya sistemi geçicidir; ZIP'i kalıcı müşteri teslimi olarak kullanmadan önce kalıcı object storage/harici release deposu bağlanmalıdır. Ürünler varsayılan olarak `review_required` durumundadır.
