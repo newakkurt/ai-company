@@ -117,7 +117,7 @@ class SchedulerTests(unittest.TestCase):
         self.assertFalse(self.store.requeue_failed_task(task_id, max_retries=2, min_age_minutes=30))
         self.assertEqual(self.store.get_task(task_id)["status"], "failed")
 
-    def test_quota_failure_waits_24_hours_before_retry(self):
+    def test_quota_failure_waits_24_hours_without_groq_fallback(self):
         now = datetime(2026, 11, 16, 8, 0, tzinfo=TR)
         scheduler.seed_due_tasks(self.store, now=now)
         task_id = "auto-prospects-tr-20261116"
@@ -128,8 +128,28 @@ class SchedulerTests(unittest.TestCase):
                 "UPDATE tasks SET updated_at=? WHERE task_id=?",
                 ((now - timedelta(hours=1)).isoformat(), task_id),
             )
-        scheduler.seed_due_tasks(self.store, now=now + timedelta(hours=1))
+        with patch.dict(os.environ, {"GROQ_API_KEY": ""}):
+            scheduler.seed_due_tasks(self.store, now=now + timedelta(hours=1))
         self.assertEqual(self.store.get_task(task_id)["status"], "failed")
+
+    def test_quota_failure_resumes_after_30_minutes_when_groq_is_configured(self):
+        now = datetime(2026, 11, 16, 8, 0, tzinfo=TR)
+        scheduler.seed_due_tasks(self.store, now=now)
+        task_id = "auto-prospects-tr-20261116"
+        self.assertEqual(self.store.claim_next_task(), task_id)
+        self.store.fail_task(task_id, "GeminiAPIError", "Gemini API returned HTTP 429 RESOURCE_EXHAUSTED")
+        with self.store._connect() as db:
+            db.execute(
+                "UPDATE tasks SET updated_at=? WHERE task_id=?",
+                ((datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat(), task_id),
+            )
+        # Existing tasks may already have used both ordinary retries before the quota failure.
+        with self.store._connect() as db:
+            self.store._event(db, task_id, "agent_task_retried", "scheduler", {"attempt": 1, "max_retries": 2})
+            self.store._event(db, task_id, "agent_task_retried", "scheduler", {"attempt": 2, "max_retries": 2})
+        with patch.dict(os.environ, {"GROQ_API_KEY": "test-groq-key"}):
+            scheduler.seed_due_tasks(self.store, now=now)
+        self.assertEqual(self.store.get_task(task_id)["status"], "planned")
 
     def test_recent_failure_is_not_retried_immediately(self):
         self.store.create_task("x task", task_id="t1")
