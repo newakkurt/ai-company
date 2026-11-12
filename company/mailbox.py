@@ -265,6 +265,20 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
                 continue
             stats["checked"] += 1
             parsed = parse_message(raw)
+            # Persist inbound classification and enforce the global opt-out list.
+            crm_meta = {"do_not_contact": False, "category": "unclassified"}
+            try:
+                from .crm import record_mail
+                crm_meta = record_mail(
+                    parsed["from"], "inbound", parsed["subject"], parsed["body"],
+                    parsed["message_id"], parsed["references"],
+                )
+            except Exception as exc:  # CRM outage must not leak or expose message content
+                print(f"mailbox: CRM logging unavailable; error_type={type(exc).__name__}", flush=True)
+            if crm_meta.get("do_not_contact"):
+                imap.store(num, "+FLAGS", "\\Seen")
+                stats["skipped"] += 1
+                continue
             verdict = classify(parsed, own)
 
             if verdict == "skip":
@@ -294,10 +308,18 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
             elif cfg.mode == "auto_reply" and not limiter.allow(parsed["from"]):
                 problem = "günlük cevap limiti doldu"
 
+            if cfg.mode == "auto_reply" and not cfg.knowledge:
+                problem = "otomatik yanıt için sahip onaylı bilgi tabanı boş"
             if problem or cfg.mode != "auto_reply":
                 imap.store(num, "+FLAGS", "\\Flagged")
                 stats["escalated" if problem else "drafted"] += 1
                 header = f"⚠️ Mail cevaplanmadı: {problem}" if problem else "✍️ Mail taslağı hazır (gönderilmedi)"
+                try:
+                    from .crm import record_mail
+                    record_mail(parsed["from"], "outbound", parsed["subject"], body,
+                                parsed["message_id"], parsed["references"])
+                except Exception:
+                    pass
                 notifier(
                     f"{header}\nKimden: {parsed['from']}\nKonu: {parsed['subject']}\n\n"
                     f"Taslak:\n{body[:1500]}"
