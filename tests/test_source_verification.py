@@ -41,7 +41,7 @@ class FakeConnection:
 class SourceVerificationTests(unittest.TestCase):
     def test_public_https_source_is_checked_and_company_match_is_recorded(self):
         result = verify_public_source(
-            "https://acme.example.com/about", "Acme Network",
+            "https://acmenetwork.com/about", "Acme Network",
             resolver=PUBLIC_DNS, connection_factory=FakeConnection,
         )
         self.assertEqual(result["source_validation_status"], "reachable_match")
@@ -52,7 +52,7 @@ class SourceVerificationTests(unittest.TestCase):
         def private_dns(host, port, type=None):
             return [(None, None, None, None, ("127.0.0.1", 443))]
         result = verify_public_source(
-            "https://public.example.com", "Public Company",
+            "https://public-company.com", "Public Company",
             resolver=private_dns, connection_factory=FakeConnection,
         )
         self.assertEqual(result["source_validation_status"], "unsafe_url")
