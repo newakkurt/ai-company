@@ -141,7 +141,7 @@ class SchedulerTests(unittest.TestCase):
         with self.store._connect() as db:
             db.execute(
                 "UPDATE tasks SET updated_at=? WHERE task_id=?",
-                ((now - timedelta(minutes=45)).isoformat(), task_id),
+                ((datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat(), task_id),
             )
         # Existing tasks may already have used both ordinary retries before the quota failure.
         with self.store._connect() as db:
