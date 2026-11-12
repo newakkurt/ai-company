@@ -60,14 +60,14 @@ jobs:
           ]
           if failed:
               lines.append("Attention required: " + ", ".join(failed))
-          report = "\\n".join(lines)
+          report = "\n".join(lines)
           print(report)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
-              f.write("## " + lines[0] + "\\n\\n")
-              f.write("\\n".join("- " + line for line in lines[1:]) + "\\n")
+              f.write("## " + lines[0] + "\n\n")
+              f.write("\n".join("- " + line for line in lines[1:]) + "\n")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write("state=" + state + "\\n")
-              f.write("report<<REPORT\\n" + report + "\\nREPORT\\n")
+              f.write("state=" + state + "\n")
+              f.write("report<<REPORT\n" + report + "\nREPORT\n")
           if failed:
               sys.exit(1)
           PY
