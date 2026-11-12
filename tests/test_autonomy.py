@@ -96,9 +96,9 @@ class SchedulerTests(unittest.TestCase):
             )
 
     def test_failed_task_retry_is_bounded_and_spaced(self):
-        now = datetime(2026, 11, 12, 8, 0, tzinfo=TR)
+        now = datetime(2026, 11, 16, 8, 0, tzinfo=TR)
         scheduler.seed_due_tasks(self.store, now=now)
-        task_id = "auto-prospects-tr-20261112"
+        task_id = "auto-prospects-tr-20261116"
 
         def fail_and_age():
             self.assertEqual(self.store.claim_next_task() is not None, True)
