@@ -549,28 +549,43 @@ def payments_summary(months: int = 12):
     monthly = defaultdict(lambda: {"gross": Decimal("0"), "platform_fees": Decimal("0"),
                                    "processing_fee_estimate": Decimal("0"), "net_estimate": Decimal("0"),
                                    "events": 0})
+    currency_totals = defaultdict(lambda: {"gross": Decimal("0"), "platform_fees": Decimal("0"),
+                                           "processing_fee_estimate": Decimal("0"), "net_estimate": Decimal("0")})
     for row in ledger:
-        key = str(row.get("received_at",""))[:7]
-        if not key: continue
+        month = str(row.get("received_at",""))[:7]
+        currency = str(row.get("currency","USD")).upper()
+        if not month: continue
+        key = f"{month}|{currency}"
         bucket = monthly[key]
+        totals = currency_totals[currency]
         bucket["gross"] += Decimal(str(row.get("gross_amount",0)))
         bucket["platform_fees"] += Decimal(str(row.get("platform_fee_amount",0)))
         bucket["processing_fee_estimate"] += Decimal(str(row.get("processing_fee_estimate",0)))
         bucket["net_estimate"] += Decimal(str(row.get("net_estimate",0)))
         bucket["events"] += 1
-    def total(rows, key):
-        return str(sum((Decimal(str(row.get(key,0))) for row in rows), Decimal("0.00")).quantize(Decimal("0.01")))
+        totals["gross"] += Decimal(str(row.get("gross_amount",0)))
+        totals["platform_fees"] += Decimal(str(row.get("platform_fee_amount",0)))
+        totals["processing_fee_estimate"] += Decimal(str(row.get("processing_fee_estimate",0)))
+        totals["net_estimate"] += Decimal(str(row.get("net_estimate",0)))
+    def by_currency(rows, key):
+        totals = defaultdict(lambda: Decimal("0.00"))
+        for row in rows:
+            totals[str(row.get("currency","USD")).upper()] += Decimal(str(row.get(key,0)))
+        return {cur:str(val.quantize(Decimal("0.01"))) for cur,val in totals.items()}
     return {
-        "currency_note":"Amounts are grouped by currency; do not combine currencies.",
+        "currency_note":"All totals are separated by currency; currencies are never added together.",
         "ledger_entries":len(ledger),
-        "gross_recorded":total(ledger,"gross_amount"),
-        "platform_fees_recorded_or_estimated":total(ledger,"platform_fee_amount"),
-        "processing_fees_estimated":total(ledger,"processing_fee_estimate"),
+        "totals_by_currency":{cur:{k:str(v.quantize(Decimal("0.01"))) for k,v in vals.items()}
+                              for cur,vals in currency_totals.items()},
+        "gross_recorded":by_currency(ledger,"gross_amount"),
+        "platform_fees_recorded_or_estimated":by_currency(ledger,"platform_fee_amount"),
+        "processing_fees_estimated":by_currency(ledger,"processing_fee_estimate"),
         "provider_payouts":payouts,
-        "provider_payout_total":total(payouts,"amount"),
+        "provider_payout_total":by_currency(payouts,"amount"),
         "bank_settlements":settlements,
-        "bank_received_total":total(settlements,"amount"),
-        "monthly":[{"month":k,**{n:(str(v) if isinstance(v,Decimal) else v) for n,v in val.items()}}
+        "bank_received_total":by_currency(settlements,"amount"),
+        "monthly":[{"month":k.split("|",1)[0],"currency":k.split("|",1)[1],
+                    **{n:(str(v) if isinstance(v,Decimal) else v) for n,v in val.items()}}
                    for k,val in sorted(monthly.items())[-months:]],
         "reconciliation":"Provider payouts and bank settlements are separate manual/provider records; bank receipt is never inferred from a sale webhook."
     }
@@ -593,14 +608,14 @@ def record_provider_payout(payload: ProviderPayoutInput):
 @app.post("/api/payments/bank-settlements", dependencies=[Depends(require_api_key)])
 def record_bank_settlement(payload: BankSettlementInput):
     try:
-        rows=store._request("bank_settlements","POST",body={
-            "provider_payout_id":payload.provider_payout_id,
-            "amount":str(payload.amount),"currency":payload.currency.upper(),
-            "bank_reference":payload.bank_reference,
-            "received_at":payload.received_at.isoformat(),"note":payload.note
-        },prefer="return=representation")
-        awaitable = rows[0] if rows else None
-        return {"ok":True,"bank_settlement":awaitable}
+        rows=store._request("bank_settlements","POST",
+            {"on_conflict":"provider_payout_id,bank_reference"},
+            {"provider_payout_id":payload.provider_payout_id,
+             "amount":str(payload.amount),"currency":payload.currency.upper(),
+             "bank_reference":payload.bank_reference or None,
+             "received_at":payload.received_at.isoformat(),"note":payload.note},
+            "resolution=ignore-duplicates,return=representation")
+        return {"ok":True,"duplicate":not bool(rows),"bank_settlement":rows[0] if rows else None}
     except Exception as exc:
         raise HTTPException(status_code=503,detail=f"Bank settlement record failed: {type(exc).__name__}")
 
