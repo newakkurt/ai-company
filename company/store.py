@@ -189,6 +189,14 @@ class SupabaseTaskStore:
         self._event(task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
         return task_id
 
+    def heartbeat_task(self, task_id: str) -> bool:
+        """Extend a running task's quiet lease while a worker is still alive."""
+        rows = self._request("tasks", "PATCH", {
+            "task_id": f"eq.{task_id}", "status": "eq.running",
+            "execution_mode": "eq.dry_run",
+        }, {"updated_at": utc_now()}, "return=representation")
+        return bool(rows)
+
     def requeue_stale_tasks(self, stale_minutes: int = STALE_LEASE_MINUTES):
         """Recover interrupted dry-run tasks after a quiet lease window."""
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
@@ -809,6 +817,15 @@ class TaskStore:
             db.execute("UPDATE assignments SET status='running' WHERE task_id=? AND status='suggested'", (task_id,))
             self._event(db, task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
             return task_id
+
+    def heartbeat_task(self, task_id: str) -> bool:
+        """Extend a running task's quiet lease while a worker is still alive."""
+        with self._connect() as db:
+            changed = db.execute(
+                "UPDATE tasks SET updated_at=? WHERE task_id=? AND status='running' AND execution_mode='dry_run'",
+                (utc_now(), task_id),
+            ).rowcount
+        return changed == 1
 
     def requeue_stale_tasks(self, stale_minutes: int = STALE_LEASE_MINUTES):
         """Recover interrupted dry-run tasks after a quiet lease window."""
