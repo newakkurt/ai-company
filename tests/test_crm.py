@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from company.crm import (
     score_company, norm_name, record_mail, suppress_contact, is_suppressed,
-    verify_company, update_company_stage, create_offer,
+    verify_company, update_company_stage, create_offer, list_companies,
 )
 
 class FakeStore:
@@ -73,6 +73,12 @@ class CRMTests(unittest.TestCase):
         }
         with self.assertRaises(ValueError):
             verify_company("co-3",store)
+
+    def test_company_search_removes_postgrest_filter_grammar(self):
+        store=FakeStore()
+        list_companies(store, query="Acme),status.eq.failed,or(id.gt.0)")
+        params=store.calls[-1][2]
+        self.assertEqual(params["or"], "(company_name.ilike.*Acme statuseqfailedorgt0*,country.ilike.*Acme statuseqfailedorgt0*,industry.ilike.*Acme statuseqfailedorgt0*)")
 
     def test_inbound_unsubscribe_creates_suppression(self):
         store=FakeStore()
