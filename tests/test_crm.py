@@ -30,7 +30,7 @@ class CRMTests(unittest.TestCase):
     def test_name_normalization(self):
         self.assertEqual(norm_name("ACME Ltd. & Co."),"acme ltd co")
     def test_score_is_bounded_and_explainable(self):
-        result=score_company({"need_summary":"network audit","industry":"MSP","source_url":"https://example.com","source_name":"Company site","business_email":"info@example.com","website":"https://example.com","country":"Türkiye","fit_reason":"multi-site network"})
+        result=score_company({"need_summary":"network audit","industry":"MSP","source_url":"https://example.com","source_name":"Company site","source_validation_status":"reachable_match","source_type":"human_verified","business_email":"info@example.com","website":"https://example.com","country":"Türkiye","fit_reason":"multi-site network"})
         self.assertEqual(result["score"],100)
         self.assertEqual(sum(result["breakdown"].values()),100)
     def test_inbound_unsubscribe_creates_suppression(self):
