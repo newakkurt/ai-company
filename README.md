@@ -102,3 +102,16 @@ GitHub Actions, Python 3.10 / 3.11 / 3.12 üzerinde testleri çalıştırır.
 - [Sales and billing](docs/SALES_AND_BILLING.md)
 - [Product publishing and delivery](docs/PRODUCT_PUBLISHING_AND_DELIVERY.md)
 - [Security](docs/SECURITY.md)
+
+
+## Read-only network configuration audit
+
+AI Company includes a file-based audit module for sanitized Cisco, Huawei, and Aruba switch configurations. It does not connect to devices or make changes.
+
+Example commands:
+
+    python -m company.network_audit --input fixtures/network_audit/cisco_sample.cfg --format markdown
+    python -m company.network_audit --input fixtures/network_audit/huawei_sample.cfg --format html --output report.html
+    python -m company.network_audit --input fixtures/network_audit/aruba_sample.cfg --format json
+
+The report includes evidence lines, severity, recommendations, and limitations. Credential-like values are redacted from report evidence. Review docs/NETWORK_AUDIT_PILOT_SCOPE.md before using customer configurations. This is not a live-device assessment or compliance certification.
