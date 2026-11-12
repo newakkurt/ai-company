@@ -348,7 +348,22 @@ async def buymeacoffee_webhook(request: Request,
         raise HTTPException(status_code=400, detail="Missing event_id or type.")
     if event.get("live_mode") is not True:
         return {"ok": True, "ignored": "test_event"}
-    event_key = f"bmc-{event_id}"
+    # BMC event_id identifies a delivery attempt. Build a stable business-event
+    # key too, so retries with a fresh attempt ID cannot double-count a sale.
+    identity = (
+        data.get("transaction_id") or data.get("psp_id") or data.get("id")
+        or event_id
+    )
+    cycle = (
+        data.get("current_period_start") or data.get("started_at")
+        or data.get("refunded_at") or event.get("created") or ""
+    )
+    stable_material = "|".join(str(v or "") for v in (
+        event_type, identity, cycle, data.get("amount"), data.get("currency"),
+        data.get("status"), data.get("membership_level_id")
+    ))
+    stable_digest = hashlib.sha256(stable_material.encode("utf-8")).hexdigest()
+    event_key = f"bmc-{stable_digest}"
     if store.get_payment_event(event_key):
         return {"ok": True, "duplicate": True}
 
