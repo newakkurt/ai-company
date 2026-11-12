@@ -244,19 +244,19 @@ class FallbackProvider:
                 # companies, contacts, prices or current facts.
                 safe_system = (
                     system_prompt
-                    + "\\n\\nSEARCH LIMITATION: You do not have web search or live browsing. "
+                    + "\n\nSEARCH LIMITATION: You do not have web search or live browsing. "
                     "Do not invent real companies, people, contact details, URLs, prices, dates, "
                     "statistics or citations. Clearly label all output SEARCH_REQUIRED / UNVERIFIED."
                 )
                 safe_user = (
                     user_prompt
-                    + "\\n\\nBecause live search is unavailable, do not claim that research "
+                    + "\n\nBecause live search is unavailable, do not claim that research "
                     "was completed. Produce only reusable search queries, qualification criteria, "
                     "a source-validation checklist and draft templates with placeholders. "
                     "List the exact evidence a human must verify before outreach."
                 )
                 result = self.fallback.generate(safe_system, safe_user)
-                return "[SEARCH FALLBACK — UNVERIFIED; NO WEB SEARCH WAS PERFORMED]\\n" + result
+                return "[SEARCH FALLBACK — UNVERIFIED; NO WEB SEARCH WAS PERFORMED]\n" + result
             return self.fallback.generate(system_prompt, user_prompt)
 
 
