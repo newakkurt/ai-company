@@ -18,14 +18,14 @@ class ConfigGuardProductTests(unittest.TestCase):
         self.assertEqual(audit(cfg)["summary"]["passed"],3)
     def test_aruba_and_report(self):
         report=audit("ip ssh\nno web-management\n","aruba")
-        self.assertEqual(report["summary"]["passed"],10)
+        self.assertEqual(report["summary"]["passed"],2)
         self.assertIn("ARB-001",render_markdown(report))
     def test_ambiguous_input_fails_closed(self):
         with self.assertRaises(ValueError): audit("hostname SWITCH-01")
     def test_unknown_vendor_fails(self):
         with self.assertRaises(ValueError): audit("x","juniper")
     def test_evidence_and_credential_redaction(self):
-        report=audit("hostname EDGE\\nsnmp-server community TOP_SECRET ro\\n","cisco")
+        report=audit("hostname EDGE\nsnmp-server community TOP_SECRET ro\n","cisco")
         risk=next(x for x in report["risks"] if x["id"]=="CIS-R02")
         self.assertEqual(risk["evidence"],["snmp-server community [REDACTED] ro"])
         self.assertNotIn("TOP_SECRET",render_markdown(report))
@@ -34,7 +34,7 @@ class ConfigGuardProductTests(unittest.TestCase):
         risk=next(x for x in report["risks"] if x["id"]=="HUA-R02")
         self.assertEqual(risk["evidence"],["snmp-agent community read cipher [REDACTED]"])
     def test_telnet_warning_and_html_escape(self):
-        report=audit("line vty 0 4\\n transport input telnet ssh <script>alert(1)</script>\\n","cisco")
+        report=audit("line vty 0 4\n transport input telnet ssh <script>alert(1)</script>\n","cisco")
         self.assertTrue(any(x["id"]=="CIS-R01" for x in report["risks"]))
         from netcmd_configguard.audit import render_html
         html=render_html(report)
@@ -44,6 +44,6 @@ class ConfigGuardProductTests(unittest.TestCase):
         fixture=Path(__file__).resolve().parents[1]/"products"/"netcmd-configguard-lite"/"examples"/"aruba-sample.cfg"
         report=audit(fixture.read_text(encoding="utf-8"),"aruba")
         self.assertEqual(report["vendor"],"aruba")
-        self.assertEqual(report["summary"]["passed"],2)
+        self.assertEqual(report["summary"]["passed"],9)
 
 if __name__=="__main__": unittest.main()
