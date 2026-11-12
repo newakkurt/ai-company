@@ -29,6 +29,9 @@ class GeminiProviderTests(unittest.TestCase):
     def test_default_model_is_flash_lite_for_high_volume_worker(self):
         self.assertEqual(GeminiProvider.DEFAULT_MODEL, "gemini-3.5-flash-lite")
 
+    def test_groq_default_model_is_current_free_plan_model(self):
+        self.assertEqual(GroqProvider.DEFAULT_MODEL, "openai/gpt-oss-20b")
+
     def test_groq_provider_uses_bearer_header_and_configured_model(self):
         response = FakeResponse(
             b'{"choices":[{"message":{"content":"Groq OK"}}]}'
