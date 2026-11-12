@@ -504,3 +504,172 @@ def product_factory_download(product_id: str):
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Product ZIP not found.")
     return DownloadFileResponse(path, media_type="application/zip", filename=path.name)
+
+
+# --- CRM: research-backed customer pipeline -----------------------------------------
+from company.crm import (
+    upsert_company as crm_upsert_company, list_companies as crm_list_companies,
+    upsert_contact as crm_upsert_contact, create_offer as crm_create_offer,
+    suppress_contact as crm_suppress_contact, list_followups as crm_list_followups,
+    record_mail as crm_record_mail, list_contacts as crm_list_contacts,
+    update_company_stage as crm_update_company_stage,
+)
+
+class CRMCompanyInput(BaseModel):
+    company_name: str = Field(min_length=2, max_length=180)
+    country: str = Field(default="Unknown", max_length=80)
+    website: str | None = Field(default=None, max_length=500)
+    industry: str | None = Field(default=None, max_length=120)
+    company_size: str | None = Field(default=None, max_length=80)
+    source_name: str = Field(min_length=2, max_length=120)
+    source_url: str = Field(min_length=8, max_length=1000)
+    source_type: str = Field(default="public_web", max_length=60)
+    public_contact_channel: str | None = Field(default=None, max_length=300)
+    business_email: str | None = Field(default=None, max_length=254)
+    need_summary: str | None = Field(default=None, max_length=1500)
+    fit_reason: str | None = Field(default=None, max_length=1500)
+
+class CRMContactInput(BaseModel):
+    full_name: str | None = Field(default=None, max_length=160)
+    role: str | None = Field(default=None, max_length=120)
+    email: str = Field(min_length=5, max_length=254)
+    source_name: str = Field(min_length=2, max_length=120)
+    source_url: str = Field(min_length=8, max_length=1000)
+    legal_basis: str = Field(default="unverified", max_length=80)
+    consent_status: str = Field(default="unknown", pattern="^(unknown|consented|withdrawn|not_required_verified)$")
+
+class CRMStageInput(BaseModel):
+    stage: str = Field(pattern="^(new|qualified|proposal|negotiation|won|lost|nurture|suppressed)$")
+
+class CRMSuppressInput(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+    reason: str = Field(min_length=3, max_length=300)
+
+class CRMFollowupInput(BaseModel):
+    company_id: str
+    contact_id: str | None = None
+    offer_id: str | None = None
+    due_at: datetime
+    note: str = Field(default="", max_length=500)
+
+class CRMEmailInput(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+    subject: str = Field(default="", max_length=200)
+    body: str = Field(min_length=1, max_length=10000)
+    external_message_id: str = ""
+    thread_id: str = ""
+
+@app.get("/crm")
+def crm_dashboard():
+    return FileResponse(WEB_DIR / "crm.html")
+
+@app.get("/api/crm/status", dependencies=[Depends(require_api_key)])
+def crm_status():
+    return {
+        "enabled": True,
+        "database": "supabase" if database_status()["backend"] == "supabase" else "sqlite",
+        "pipeline": ["TR+global research", "lead dedupe", "evidence capture", "fit scoring",
+                     "needs analysis", "personalized proposal", "draft+followup",
+                     "inbound classification", "approved-facts replies", "suppression list"],
+        "outbound_sending": False, "human_approval_required": True,
+        "privacy": "public business sources only; no private personal-data scraping",
+    }
+
+@app.get("/api/crm/companies", dependencies=[Depends(require_api_key)])
+def crm_companies(q: str = "", stage: str | None = None, limit: int = 100):
+    try:
+        return {"companies": crm_list_companies(store, limit, q, stage)}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"CRM database unavailable: {type(exc).__name__}")
+
+@app.post("/api/crm/companies", dependencies=[Depends(require_api_key)])
+def crm_add_company(payload: CRMCompanyInput):
+    try:
+        return crm_upsert_company(payload.model_dump(), store)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc)[:240])
+
+@app.get("/api/crm/contacts", dependencies=[Depends(require_api_key)])
+def crm_contacts(company_id: str | None = None):
+    return {"contacts": crm_list_contacts(company_id, store)}
+
+@app.post("/api/crm/companies/{company_id}/contacts", dependencies=[Depends(require_api_key)])
+def crm_add_contact(company_id: str, payload: CRMContactInput):
+    try:
+        return crm_upsert_contact(company_id, payload.model_dump(), store)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+@app.patch("/api/crm/companies/{company_id}/stage", dependencies=[Depends(require_api_key)])
+def crm_set_stage(company_id: str, payload: CRMStageInput):
+    try:
+        return crm_update_company_stage(company_id, payload.stage, store)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Company not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+@app.post("/api/crm/companies/{company_id}/offer", dependencies=[Depends(require_api_key)])
+def crm_offer(company_id: str, product_name: str = "NetCmd PRO"):
+    try:
+        return crm_create_offer(company_id, product_name, store)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Company not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+@app.get("/api/crm/offers", dependencies=[Depends(require_api_key)])
+def crm_offers(limit: int = 100):
+    return {"offers": store._request("crm_offers", params={
+        "select":"*", "order":"created_at.desc", "limit":str(max(1,min(limit,250)))
+    })}
+
+@app.post("/api/crm/suppress", dependencies=[Depends(require_api_key)])
+def crm_suppress(payload: CRMSuppressInput):
+    try:
+        return crm_suppress_contact(payload.email, payload.reason, "owner_manual", store)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+@app.get("/api/crm/followups", dependencies=[Depends(require_api_key)])
+def crm_followups():
+    return {"followups": crm_list_followups(store)}
+
+@app.post("/api/crm/followups", dependencies=[Depends(require_api_key)])
+def crm_add_followup(payload: CRMFollowupInput):
+    row = {"followup_id":"fu-"+uuid.uuid4().hex[:12], **payload.model_dump(),
+           "due_at":payload.due_at.astimezone(timezone.utc).isoformat(),
+           "status":"pending", "created_at":datetime.now(timezone.utc).isoformat()}
+    store._request("crm_followups","POST",body=row,prefer="return=minimal")
+    return row
+
+@app.get("/api/crm/mail", dependencies=[Depends(require_api_key)])
+def crm_mail(limit: int = 100):
+    return {"messages":store._request("crm_mail_log",params={
+        "select":"*", "order":"created_at.desc", "limit":str(max(1,min(limit,250)))
+    })}
+
+@app.post("/api/crm/mail/classify", dependencies=[Depends(require_api_key)])
+def crm_classify_mail(payload: CRMEmailInput):
+    return crm_record_mail(payload.email, "inbound", payload.subject, payload.body,
+                           payload.external_message_id, payload.thread_id, store)
+
+@app.post("/api/crm/research", dependencies=[Depends(require_api_key)])
+def crm_research(country: str = "both"):
+    if country not in {"both","TR","global"}:
+        raise HTTPException(status_code=422, detail="country must be both, TR or global")
+    description = (
+        "Research qualified B2B companies for NetCmd PRO. Target region: "
+        + ("Turkey and global" if country == "both" else "Turkey" if country == "TR" else "outside Turkey")
+        + ". Use public company sources only. Return up to 10 companies in a clearly delimited "
+        "CRM_LEADS_JSON: [ ... ] block. Each item: company_name,country,website,industry,"
+        "source_name,source_url,public_contact_channel,need_summary,fit_reason. "
+        "No personal emails, no private individuals, no invented facts, no outreach. "
+        "Only cite URLs actually used; if evidence is insufficient, return an empty array."
+    )
+    task = store.create_task(description, task_id="crm-research-" + uuid.uuid4().hex[:10])
+    agents = [a.id for a in load_agents() if a.id in {
+        "ceo","research_intelligence","marketing_growth","product_business","network_infrastructure"
+    }]
+    store.assign_agents(task["task_id"], agents)
+    return {"task_id":task["task_id"],"status":"queued","assigned_agents":agents}

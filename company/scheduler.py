@@ -40,19 +40,23 @@ PLAYBOOKS: tuple[Playbook, ...] = (
     Playbook(
         "prospects-tr", "daily",
         ("research_intelligence", "marketing_growth", "product_business", "network_infrastructure"),
-        "Find up to 10 qualified prospect companies in Turkey (factories, OSB/industrial zones, "
-        "ISPs, system integrators, MSPs) that plausibly need network audit / network operations "
-        "tooling such as NetCmd. For each: company, why it fits, public business contact channel, "
-        "source URL, suggested first-touch angle. Skip companies listed in earlier reports."
+        "Find up to 10 qualified B2B prospect companies in Turkey (factories, OSB/industrial zones, "
+        "ISPs, system integrators, MSPs) that plausibly need network audit / operations tooling. "
+        "Output a CRM_LEADS_JSON: [ ... ] block with company_name,country,website,industry,source_name,"
+        "source_url,public_contact_channel,need_summary,fit_reason. Only use verified public company "
+        "sources and HTTPS source URLs actually opened. Never invent contacts or use personal emails. "
+        "Skip companies listed in earlier reports. Also explain qualification evidence."
         + _RULES,
     ),
     Playbook(
         "prospects-global", "daily",
         ("research_intelligence", "marketing_growth", "product_business", "network_infrastructure"),
-        "Find up to 10 qualified prospect companies outside Turkey (MSPs, network consultancies, "
-        "regional ISPs, enterprise IT teams) that plausibly need AI-assisted network audit / "
-        "multi-vendor command tooling (Cisco, Huawei, Aruba, Fortinet). For each: company, country, "
-        "fit rationale, public contact channel, source URL, suggested angle."
+        "Find up to 10 qualified B2B prospect companies outside Turkey (MSPs, network consultancies, "
+        "regional ISPs, enterprise IT teams) that plausibly need multi-vendor network tooling. "
+        "Output a CRM_LEADS_JSON: [ ... ] block with company_name,country,website,industry,source_name,"
+        "source_url,public_contact_channel,need_summary,fit_reason. Only use verified public company "
+        "sources and HTTPS source URLs actually opened. Never invent contacts or use personal emails. "
+        "Also explain qualification evidence."
         + _RULES,
     ),
     Playbook(

@@ -1,6 +1,7 @@
 """CRM primitives: company leads, deduplication, scoring, proposals and suppression."""
 from __future__ import annotations
 import re, uuid
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from .store import TaskStore
 
@@ -38,6 +39,9 @@ def upsert_company(data: dict, store=None) -> dict:
     db = _db(store)
     name = " ".join(data["company_name"].split())
     country = (data.get("country") or "Unknown").strip()
+    source_url = str(data.get("source_url") or "").strip()
+    if urlparse(source_url).scheme != "https" or not urlparse(source_url).netloc:
+        raise ValueError("A public HTTPS source URL is required")
     normalized = norm_name(name)
     score = score_company(data)
     existing = db._request("crm_companies", params={
@@ -48,7 +52,7 @@ def upsert_company(data: dict, store=None) -> dict:
         "company_id":company_id, "company_name":name, "normalized_name":normalized,
         "country":country, "website":data.get("website"), "industry":data.get("industry"),
         "company_size":data.get("company_size"), "source_name":data.get("source_name") or "unknown",
-        "source_url":data.get("source_url") or "https://example.invalid/unverified",
+        "source_url":source_url,
         "source_type":data.get("source_type") or "public_web",
         "public_contact_channel":data.get("public_contact_channel"),
         "business_email":norm_email(data["business_email"]) if data.get("business_email") else None,
@@ -73,11 +77,14 @@ def upsert_contact(company_id: str | None, data: dict, store=None) -> dict:
     db=_db(store)
     email=norm_email(data["email"])
     if not EMAIL_RE.match(email): raise ValueError("Invalid business email")
+    source_url = str(data.get("source_url") or "").strip()
+    if urlparse(source_url).scheme != "https" or not urlparse(source_url).netloc:
+        raise ValueError("A public HTTPS source URL is required")
     existing=db._request("crm_contacts",params={"select":"*","normalized_email":f"eq.{email}","limit":"1"})
     contact_id=existing[0]["contact_id"] if existing else "ct-"+uuid.uuid4().hex[:12]
     row={"contact_id":contact_id,"company_id":company_id,"full_name":data.get("full_name"),
          "role":data.get("role"),"email":email,"normalized_email":email,
-         "source_name":data.get("source_name") or "unknown","source_url":data.get("source_url") or "https://example.invalid/unverified",
+         "source_name":data.get("source_name") or "unknown","source_url":source_url,
          "legal_basis":data.get("legal_basis") or "unverified",
          "consent_status":data.get("consent_status") or "unknown",
          "updated_at":now()}
@@ -151,3 +158,19 @@ def create_offer(company_id: str, product_name: str, store=None) -> dict:
 
 def list_followups(store=None):
     return _db(store)._request("crm_followups",params={"select":"*","status":"eq.pending","order":"due_at.asc","limit":"100"})
+
+
+def list_contacts(company_id: str | None = None, store=None):
+    params={"select":"*","order":"created_at.desc","limit":"200"}
+    if company_id: params["company_id"]=f"eq.{company_id}"
+    return _db(store)._request("crm_contacts",params=params)
+
+def update_company_stage(company_id: str, stage: str, store=None):
+    allowed={"new","qualified","proposal","negotiation","won","lost","nurture","suppressed"}
+    if stage not in allowed: raise ValueError("Invalid CRM stage")
+    db=_db(store)
+    db._request("crm_companies","PATCH",{"company_id":f"eq.{company_id}"},
+                {"stage":stage,"updated_at":now()},"return=minimal")
+    rows=db._request("crm_companies",params={"select":"*","company_id":f"eq.{company_id}","limit":"1"})
+    if not rows: raise KeyError("Company not found")
+    return rows[0]

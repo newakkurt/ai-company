@@ -328,6 +328,12 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
 
             with open_smtp(cfg) as smtp:
                 smtp.send_message(build_reply(cfg, parsed, body))
+            try:
+                from .crm import record_mail
+                record_mail(parsed["from"], "outbound", parsed["subject"], body,
+                            parsed["message_id"], parsed["references"])
+            except Exception:
+                pass
             limiter.record(parsed["from"])
             imap.store(num, "+FLAGS", "\\Seen \\Answered")
             stats["replied"] += 1
