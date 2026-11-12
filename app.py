@@ -890,8 +890,9 @@ def crm_status():
     return {
         "enabled": True,
         "database": "supabase" if database_status()["backend"] == "supabase" else "sqlite",
-        "pipeline": ["TR+global research", "lead dedupe", "evidence capture", "fit scoring",
-                     "needs analysis", "personalized proposal", "draft+followup",
+        "pipeline": ["TR+global research", "SSRF-safe public source check", "lead dedupe",
+                     "human source verification", "fit scoring", "needs analysis",
+                     "qualified proposal draft+followup",
                      "inbound classification", "approved-facts replies", "suppression list"],
         "outbound_sending": False, "human_approval_required": True,
         "privacy": "public business sources only; no private personal-data scraping",
