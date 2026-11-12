@@ -473,6 +473,37 @@ class SaleWebhookTests(unittest.TestCase):
         cancel.assert_called_once()
 
 
+
+    def test_membership_updated_without_new_cycle_is_not_a_second_sale(self):
+        start = self.event(current_period_start="2026-11-01T00:00:00Z")
+        update = self.event(event_id="e2", type="membership.updated",
+                            current_period_start="2026-11-01T00:00:00Z")
+        with patch("app.notify_sale") as sale:
+            self.call(start)
+            result = self.call(update)
+        self.assertFalse(result["payment_recorded"])
+        sale.assert_called_once()
+
+    def test_membership_updated_with_new_cycle_records_a_renewal(self):
+        start = self.event(current_period_start="2026-11-01T00:00:00Z")
+        update = self.event(event_id="e2", type="membership.updated",
+                            current_period_start="2026-12-01T00:00:00Z")
+        with patch("app.notify_sale") as sale:
+            self.call(start)
+            result = self.call(update)
+        self.assertTrue(result["membership_status"] == "active")
+        sale.assert_has_calls([unittest.mock.call("membership.started", unittest.mock.ANY),
+                               unittest.mock.call("membership.updated", unittest.mock.ANY)])
+        with self.store._connect() as db:
+            count = db.execute("SELECT COUNT(*) FROM payment_ledger").fetchone()[0]
+        self.assertEqual(count, 2)
+
+    def test_bmc_product_map_is_parsed_from_json(self):
+        mapping = {"99": {"product_id": "prd-abcdef123456", "price_usd": "30.00"}}
+        with patch.dict(os.environ, {"BMC_PRODUCT_LEVEL_MAP": json.dumps(mapping)}):
+            self.assertEqual(app._load_bmc_product_level_map(), mapping)
+
+
 class ServicesStatusTests(unittest.TestCase):
     def test_readiness_includes_services_block(self):
         with patch("app.database_status", return_value={"backend": "sqlite_ephemeral", "connected": True, "error": None}), \
