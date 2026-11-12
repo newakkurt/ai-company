@@ -2,20 +2,22 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hmac
 import hashlib
 import json
 import os
 import re
+import secrets
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -24,6 +26,7 @@ from company.approvals import (
     ApprovalError, action_requires_approval, consume_action_approval,
 )
 from company.mailbox import mail_status, run_mail_forever
+from company.delivery import send_product_delivery_email
 from company.notifier import (
     notifier_configured,
     notify_cancellation,
@@ -163,6 +166,10 @@ class ApprovalRequestInput(BaseModel):
 class ApprovalDecisionInput(BaseModel):
     decision: Literal["approved", "rejected"]
     note: str = Field(default="", max_length=1000)
+
+
+class ProductPublishInput(BaseModel):
+    approval_id: str = Field(min_length=8, max_length=160)
 
 
 def require_api_key(authorization: str | None = Header(default=None)) -> None:
@@ -376,10 +383,250 @@ def _verify_bmc_signature(raw_body: bytes, secret: str, signature: str) -> bool:
 
 
 def _iso_timestamp(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
     try:
-        return datetime.fromtimestamp(int(value), tz=timezone.utc).isoformat() if value else None
+        if isinstance(value, (int, float)) or str(value).strip().isdigit():
+            return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _load_bmc_extra_product_map() -> dict:
+    raw = os.getenv("BMC_EXTRA_PRODUCT_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=503, detail="BMC_EXTRA_PRODUCT_MAP is invalid JSON.") from exc
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=503, detail="BMC_EXTRA_PRODUCT_MAP must be a JSON object.")
+    return value
+
+
+def _bmc_extra_reference(payment_id: Any, extra_id: Any, index: int) -> str:
+    safe_payment = re.sub(r"[^A-Za-z0-9_-]", "-", str(payment_id or "unknown"))[:45]
+    safe_extra = re.sub(r"[^A-Za-z0-9_-]", "-", str(extra_id or "unknown"))[:30]
+    return f"bmc-extra-{safe_payment}-{safe_extra}-{index}"[:120]
+
+
+def _write_payment_ledger_row(ledger_row: dict) -> bool:
+    if hasattr(store, "_request"):
+        rows = store._request(
+            "payment_ledger", "POST", {"on_conflict": "event_id"}, ledger_row,
+            "resolution=ignore-duplicates,return=representation"
+        )
+        return bool(rows)
+    with store._connect() as db:
+        db.execute("""CREATE TABLE IF NOT EXISTS payment_ledger (
+            event_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,subscription_id TEXT,
+            product_code TEXT NOT NULL,gross_amount REAL NOT NULL,currency TEXT NOT NULL,
+            platform_fee_amount REAL NOT NULL,processing_fee_estimate REAL NOT NULL,
+            net_estimate REAL NOT NULL,entry_status TEXT NOT NULL,provider_created_at TEXT,
+            received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,raw_event TEXT NOT NULL)""")
+        cur = db.execute("""INSERT OR IGNORE INTO payment_ledger
+            (event_id,event_type,subscription_id,product_code,gross_amount,currency,
+             platform_fee_amount,processing_fee_estimate,net_estimate,entry_status,
+             provider_created_at,raw_event) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (ledger_row["event_id"], ledger_row["event_type"], ledger_row.get("subscription_id"),
+             ledger_row["product_code"], float(ledger_row["gross_amount"]), ledger_row["currency"],
+             float(ledger_row["platform_fee_amount"]), float(ledger_row["processing_fee_estimate"]),
+             float(ledger_row["net_estimate"]), ledger_row["entry_status"],
+             ledger_row.get("provider_created_at"), json.dumps(ledger_row["raw_event"])))
+    return cur.rowcount == 1
+
+
+async def _handle_bmc_extra_purchase(event: dict, event_key: str, data: dict):
+    extra_map = _load_bmc_extra_product_map()
+    if not extra_map:
+        raise HTTPException(status_code=503, detail="BMC_EXTRA_PRODUCT_MAP is not configured.")
+    extras = data.get("extras")
+    if not isinstance(extras, list) or not extras:
+        raise HTTPException(status_code=400, detail="BMC extra purchase contains no shop items.")
+
+    payment_id = data.get("id") or data.get("transaction_id") or data.get("psp_id")
+    if not payment_id:
+        raise HTTPException(status_code=400, detail="BMC extra purchase has no payment identifier.")
+    statuses = []
+    for index, extra in enumerate(extras):
+        if not isinstance(extra, dict):
+            raise HTTPException(status_code=400, detail="Invalid BMC extra item.")
+        extra_id = str(extra.get("id") or "").strip()
+        mapping = extra_map.get(extra_id)
+        if isinstance(mapping, str):
+            mapping = {"product_id": mapping}
+        if not extra_id or not isinstance(mapping, dict):
+            await asyncio.to_thread(
+                notify_owner,
+                f"⚠️ BMC shop item eşlemesi eksik. Extra ID: {extra_id or 'missing'}; "
+                "BMC_EXTRA_PRODUCT_MAP ayarını tamamlayın."
+            )
+            raise HTTPException(status_code=503, detail=f"BMC shop item {extra_id or 'unknown'} is not mapped.")
+
+        product_id = str(mapping.get("product_id") or "").strip()
+        if not product_id:
+            raise HTTPException(status_code=503, detail=f"BMC shop item {extra_id} has no product_id mapping.")
+        try:
+            quantity = int(extra.get("quantity", 1))
+            item_amount = Decimal(str(extra.get("amount", "0")))
+            expected_unit_price = Decimal(str(mapping.get("price_usd", "0")))
+        except (ValueError, InvalidOperation):
+            raise HTTPException(status_code=400, detail=f"Invalid price or quantity for BMC shop item {extra_id}.")
+        if quantity < 1 or quantity > 100 or item_amount <= 0 or expected_unit_price <= 0:
+            raise HTTPException(status_code=400, detail=f"Invalid price or quantity for BMC shop item {extra_id}.")
+        currency = str(extra.get("currency") or data.get("currency") or "").upper()
+        expected_total = expected_unit_price * quantity
+        if currency != "USD" or item_amount not in {expected_unit_price, expected_total}:
+            await asyncio.to_thread(
+                notify_owner,
+                f"⚠️ BMC shop item fiyat/para birimi eşleşmedi. Extra ID: {extra_id}; "
+                f"gelen: {item_amount} {currency}; beklenen birim: {expected_unit_price} USD."
+            )
+            raise HTTPException(status_code=503, detail=f"Price/currency mismatch for BMC shop item {extra_id}.")
+        gross = item_amount * quantity if item_amount == expected_unit_price else item_amount
+
+        release = store.get_product_release(product_id)
+        if not release:
+            await asyncio.to_thread(
+                notify_owner,
+                f"⚠️ BMC shop item {extra_id} için product_id bulunamadı: {product_id}"
+            )
+            raise HTTPException(status_code=503, detail=f"Mapped product release {product_id} was not found.")
+
+        extra_ref = _bmc_extra_reference(payment_id, extra_id, index)
+        item_event_key = "bmc-extra-" + hashlib.sha256(
+            f"{payment_id}|{extra_id}|{index}".encode("utf-8")
+        ).hexdigest()
+        ledger_exists = store.get_payment_event(item_event_key)
+        if not ledger_exists:
+            order_total = Decimal(str(data.get("amount", gross)))
+            application_fee = Decimal(str(data.get("application_fee", "0") or "0"))
+            if order_total > 0 and application_fee > 0:
+                platform_fee = (application_fee * gross / order_total).quantize(Decimal("0.01"))
+            else:
+                platform_fee = (gross * Decimal("0.05")).quantize(Decimal("0.01"))
+            processing_fee = (gross * Decimal("0.034") + Decimal("0.30")).quantize(Decimal("0.01"))
+            payout_fee = (gross * Decimal("0.005")).quantize(Decimal("0.01"))
+            product_code = str(mapping.get("product_code") or product_id)[:80]
+            ledger_row = {
+                "event_id": item_event_key, "event_type": "extra_purchase.created",
+                "subscription_id": extra_ref, "product_code": product_code,
+                "gross_amount": str(gross), "currency": currency,
+                "platform_fee_amount": str(platform_fee),
+                "processing_fee_estimate": str(processing_fee),
+                "net_estimate": str(gross - platform_fee - processing_fee - payout_fee),
+                "entry_status": "recognized_estimate",
+                "provider_created_at": _iso_timestamp(data.get("created_at") or event.get("created")),
+                "raw_event": {"event": event, "extra": extra},
+            }
+            try:
+                _write_payment_ledger_row(ledger_row)
+            except Exception as exc:
+                print(f"payment_ledger: extra write failed; error_type={type(exc).__name__}", flush=True)
+                raise HTTPException(status_code=503, detail="Payment ledger temporarily unavailable.")
+
+        entitlement_result = store.create_product_entitlement(
+            item_event_key, extra_ref, product_id,
+            data.get("supporter_email"), data.get("supporter_name"),
+        )
+        entitlement = entitlement_result.get("entitlement") if entitlement_result else None
+        if not entitlement:
+            raise HTTPException(status_code=503, detail="Could not create product entitlement.")
+        status = await _deliver_product_entitlement(entitlement, release)
+        store.record_payment_event(item_event_key, "extra_purchase.created", extra_ref)
+        statuses.append({"extra_id": extra_id, "product_id": product_id, "delivery_status": status})
+        await asyncio.to_thread(notify_sale, "extra_purchase.created", {
+            "supporter_email": data.get("supporter_email"),
+            "supporter_name": data.get("supporter_name"),
+            "membership_level_name": str(mapping.get("product_name") or extra.get("title") or release["name"]),
+            "amount": str(gross), "currency": currency, "delivery_status": status,
+        })
+
+    store.record_payment_event(event_key, "extra_purchase.created", str(payment_id))
+    return {"ok": True, "items_processed": len(statuses), "items": statuses}
+
+
+def _load_bmc_product_level_map() -> dict:
+    raw = os.getenv("BMC_PRODUCT_LEVEL_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=503, detail="BMC_PRODUCT_LEVEL_MAP is invalid JSON.") from exc
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=503, detail="BMC_PRODUCT_LEVEL_MAP must be a JSON object.")
+    return value
+
+
+async def _deliver_product_entitlement(entitlement: dict, release: dict) -> str:
+    entitlement_id = entitlement["entitlement_id"]
+    if release.get("release_status") != "approved_for_sale":
+        return "pending"
+    recipient = str(entitlement.get("buyer_email") or "").strip()
+    if not recipient:
+        store.update_product_entitlement_delivery(entitlement_id, "manual_required")
+        await asyncio.to_thread(
+            notify_owner,
+            f"💳 Ürün satın alımı bekliyor; alıcı e-postası yok.\n"
+            f"Ürün: {release['name']}\nAbonelik: {entitlement['subscription_id']}"
+        )
+        return "manual_required"
+
+    existing_token = store.get_product_download_token_for_entitlement(entitlement_id)
+    if existing_token:
+        return entitlement.get("delivery_status") or "token_exists"
+
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    token_created = store.create_product_download_token(
+        entitlement_id, token_hash, expires_at, max_downloads=5
+    )
+    if not token_created:
+        return "token_exists"
+
+    download_url = (
+        os.getenv("APP_PUBLIC_URL", "https://ai-company-ferd.onrender.com").rstrip("/")
+        + "/download/" + token
+    )
+    try:
+        sent = await asyncio.to_thread(
+            send_product_delivery_email, recipient,
+            entitlement.get("buyer_name") or "", release["name"], download_url,
+        )
+    except Exception as exc:
+        print(f"product_delivery: email failed; error_type={type(exc).__name__}", flush=True)
+        sent = False
+    status = "sent" if sent else "manual_required"
+    store.update_product_entitlement_delivery(entitlement_id, status)
+    if not sent:
+        await asyncio.to_thread(
+            notify_owner,
+            f"💳 Ürün satışı alındı; e-posta gönderilemedi.\n"
+            f"Alıcı: {recipient}\nÜrün: {release['name']}\n"
+            f"Teslimat bağlantısı (7 gün / 5 indirme):\n{download_url}"
+        )
+    return status
+
+
+@app.post("/api/payments/entitlements/{subscription_id}/deliver",
+          dependencies=[Depends(require_api_key)])
+async def deliver_pending_product_entitlement(subscription_id: str):
+    entitlement = store.get_product_entitlement_by_subscription(subscription_id)
+    if not entitlement:
+        raise HTTPException(status_code=404, detail="Product entitlement not found.")
+    release = store.get_product_release(entitlement["product_id"])
+    if not release:
+        raise HTTPException(status_code=404, detail="Product release not found.")
+    status = await _deliver_product_entitlement(entitlement, release)
+    return {"ok": status in {"sent", "pending", "manual_required", "token_exists"},
+            "delivery_status": status, "entitlement_id": entitlement["entitlement_id"]}
 
 
 @app.post("/webhooks/buymeacoffee")
@@ -403,26 +650,18 @@ async def buymeacoffee_webhook(request: Request,
         raise HTTPException(status_code=400, detail="Missing event_id or type.")
     if event.get("live_mode") is not True:
         return {"ok": True, "ignored": "test_event"}
-    # BMC event_id identifies a delivery attempt. Build a stable business-event
-    # key too, so retries with a fresh attempt ID cannot double-count a sale.
-    identity = (
-        data.get("transaction_id") or data.get("psp_id") or data.get("id")
-        or event_id
-    )
-    cycle = (
-        data.get("current_period_start") or data.get("started_at")
-        or data.get("refunded_at") or event.get("created") or ""
-    )
+
+    identity = data.get("transaction_id") or data.get("psp_id") or data.get("id") or event_id
+    cycle = data.get("current_period_start") or data.get("started_at") or data.get("refunded_at") or event.get("created") or ""
     stable_material = "|".join(str(v or "") for v in (
         event_type, identity, cycle, data.get("amount"), data.get("currency"),
-        data.get("status"), data.get("membership_level_id")
+        data.get("status"), data.get("membership_level_id"),
+        json.dumps(data.get("extras") or [], sort_keys=True, default=str)
     ))
-    stable_digest = hashlib.sha256(stable_material.encode("utf-8")).hexdigest()
-    event_key = f"bmc-{stable_digest}"
+    event_key = "bmc-" + hashlib.sha256(stable_material.encode("utf-8")).hexdigest()
     if store.get_payment_event(event_key):
         return {"ok": True, "duplicate": True}
 
-    supported = {"membership.started", "membership.updated", "membership.cancelled", "membership.paused"}
     if event_type.endswith(".refunded"):
         try:
             refund_amount = Decimal(str(data.get("amount", "0")))
@@ -431,38 +670,48 @@ async def buymeacoffee_webhook(request: Request,
                 raise ValueError("missing refund amount/currency")
             refund_subscription = str(data.get("subscription_id") or data.get("psp_id") or "").strip() or None
             if hasattr(store, "_request"):
-                inserted = store._request("payment_ledger", "POST", {"on_conflict":"event_id"}, {
-                    "event_id":event_key,"event_type":event_type,"subscription_id":refund_subscription,
-                    "product_code":"netcmd_pro","gross_amount":str(-refund_amount),
-                    "currency":refund_currency,"platform_fee_amount":"0",
-                    "processing_fee_estimate":"0","net_estimate":str(-refund_amount),
-                    "entry_status":"refund_reported","provider_created_at":_iso_timestamp(event.get("created")),
-                    "raw_event":event
+                inserted = store._request("payment_ledger", "POST", {"on_conflict": "event_id"}, {
+                    "event_id": event_key, "event_type": event_type,
+                    "subscription_id": refund_subscription, "product_code": "bmc_refund",
+                    "gross_amount": str(-refund_amount), "currency": refund_currency,
+                    "platform_fee_amount": "0", "processing_fee_estimate": "0",
+                    "net_estimate": str(-refund_amount), "entry_status": "refund_reported",
+                    "provider_created_at": _iso_timestamp(event.get("created")), "raw_event": event,
                 }, "resolution=ignore-duplicates,return=representation")
                 first_refund_record = bool(inserted)
             else:
                 with store._connect() as db:
-                    db.execute("""CREATE TABLE IF NOT EXISTS payment_ledger (
-                        event_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,subscription_id TEXT,
-                        product_code TEXT NOT NULL,gross_amount REAL NOT NULL,currency TEXT NOT NULL,
-                        platform_fee_amount REAL NOT NULL,processing_fee_estimate REAL NOT NULL,
-                        net_estimate REAL NOT NULL,entry_status TEXT NOT NULL,provider_created_at TEXT,
-                        received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,raw_event TEXT NOT NULL)""")
-                    cur=db.execute("""INSERT OR IGNORE INTO payment_ledger
+                    cur = db.execute("""INSERT OR IGNORE INTO payment_ledger
                         (event_id,event_type,subscription_id,product_code,gross_amount,currency,
                          platform_fee_amount,processing_fee_estimate,net_estimate,entry_status,
                          provider_created_at,raw_event) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                        (event_key,event_type,refund_subscription,"netcmd_pro",float(-refund_amount),
+                        (event_key,event_type,refund_subscription,"bmc_refund",float(-refund_amount),
                          refund_currency,0,0,float(-refund_amount),"refund_reported",
                          _iso_timestamp(event.get("created")),json.dumps(event)))
-                    first_refund_record=cur.rowcount==1
-            store.record_payment_event(event_key,event_type,refund_subscription)
+                    first_refund_record = cur.rowcount == 1
+            store.record_payment_event(event_key, event_type, refund_subscription)
+            if refund_subscription:
+                store.update_product_entitlement_status(refund_subscription, "refunded")
+            if event_type == "extra_purchase.refunded":
+                payment_id = data.get("id") or data.get("transaction_id") or data.get("psp_id")
+                for index, extra in enumerate(data.get("extras") or []):
+                    if isinstance(extra, dict):
+                        extra_ref = _bmc_extra_reference(payment_id, extra.get("id"), index)
+                        store.update_product_entitlement_status(extra_ref, "refunded")
             if first_refund_record:
-                await asyncio.to_thread(notify_unexpected_payment,event_type,
-                    "İade olayı kaydedildi; BMC panelindeki gerçek iade tutarı ve bakiyeyle mutabakat yapın",data)
-            return {"ok":True,"refund_recorded":first_refund_record}
+                await asyncio.to_thread(notify_unexpected_payment, event_type,
+                    "İade olayı kaydedildi; BMC panelindeki gerçek iade tutarı ve bakiyeyle mutabakat yapın", data)
+            return {"ok": True, "refund_recorded": first_refund_record}
         except (ValueError, InvalidOperation):
-            raise HTTPException(status_code=400,detail="Invalid refund amount or currency.")
+            raise HTTPException(status_code=400, detail="Invalid refund amount or currency.")
+
+    if event_type == "extra_purchase.created":
+        return await _handle_bmc_extra_purchase(event, event_key, data)
+    if event_type == "extra_purchase.updated":
+        store.record_payment_event(event_key, event_type, str(data.get("id") or data.get("transaction_id") or ""))
+        return {"ok": True, "order_updated": True}
+
+    supported = {"membership.started", "membership.updated", "membership.cancelled", "membership.paused"}
     if event_type not in supported:
         store.record_payment_event(event_key, event_type, None)
         await asyncio.to_thread(notify_unexpected_payment, event_type, "desteklenmeyen olay türü", data)
@@ -480,73 +729,98 @@ async def buymeacoffee_webhook(request: Request,
             status = "canceled" if event_type.endswith("cancelled") else "paused"
             updated = {**existing, "status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
             store.upsert_membership(updated)
+            store.update_product_entitlement_status(
+                subscription_id, "cancelled" if status == "canceled" else "paused"
+            )
         store.record_payment_event(event_key, event_type, subscription_id)
         if existing:
             await asyncio.to_thread(notify_cancellation, safe_subscription_id, status)
         return {"ok": True, "membership_status": "updated" if existing else "not_found"}
 
+    product_map = _load_bmc_product_level_map()
     expected_level = os.getenv("BMC_PRO_MEMBERSHIP_LEVEL_ID", "").strip()
-    if not expected_level:
-        raise HTTPException(status_code=503, detail="PRO membership level ID is not configured.")
+    if not expected_level and not product_map:
+        raise HTTPException(status_code=503, detail="BMC product level mapping is not configured.")
     try:
         level_id = int(data.get("membership_level_id", -1))
-        expected_price = Decimal(os.getenv("BMC_PRO_PRICE_USD", "69"))
+        mapping = product_map.get(str(level_id))
+        if isinstance(mapping, str):
+            mapping = {"product_id": mapping}
+        if mapping is None and expected_level and str(level_id) == expected_level:
+            mapping = {
+                "product_id": os.getenv("BMC_PRO_PRODUCT_ID", "").strip(),
+                "product_code": "netcmd_pro",
+                "price_usd": os.getenv("BMC_PRO_PRICE_USD", "69"),
+                "product_name": "NetCmd PRO",
+            }
+        if not isinstance(mapping, dict):
+            store.record_payment_event(event_key, event_type, subscription_id)
+            return {"ok": True, "ignored": "unmapped_product_level"}
+        expected_price = Decimal(str(mapping.get("price_usd", os.getenv("BMC_PRO_PRICE_USD", "69"))))
         amount = Decimal(str(data.get("amount", "0")))
     except (ValueError, InvalidOperation):
         raise HTTPException(status_code=400, detail="Invalid membership price or level.")
+
     currency = str(data.get("currency", "")).upper()
-    if level_id != int(expected_level) or currency != "USD" or amount != expected_price:
+    if currency != "USD" or amount != expected_price:
         store.record_payment_event(event_key, event_type, subscription_id)
         await asyncio.to_thread(
             notify_unexpected_payment, event_type,
-            "plan/fiyat/para birimi yapılandırılmış NetCmd PRO ile eşleşmiyor", data,
+            "plan/fiyat/para birimi BMC_PRODUCT_LEVEL_MAP ile eşleşmiyor", data,
         )
-        return {"ok": True, "ignored": "not_the_configured_netcmd_pro_plan"}
+        return {"ok": True, "ignored": "product_or_price_mismatch"}
     if str(data.get("status", "active")).lower() not in {"active", "succeeded"}:
         store.record_payment_event(event_key, event_type, subscription_id)
-        await asyncio.to_thread(
-            notify_unexpected_payment, event_type, "üyelik durumu aktif değil", data,
-        )
+        await asyncio.to_thread(notify_unexpected_payment, event_type, "üyelik durumu aktif değil", data)
         return {"ok": True, "ignored": "membership_not_active"}
 
-    task = store.create_task(
-        "Paid NetCmd PRO customer onboarding: prepare a safe, evidence-led network audit workflow. "
-        "No customer credentials, direct device access, configuration changes, or external actions are permitted.",
-        task_id=task_id,
+    product_id = str(mapping.get("product_id") or "").strip()
+    product_code = str(mapping.get("product_code") or product_id or "netcmd_pro")[:80]
+    product_name = str(mapping.get("product_name") or "NetCmd PRO")[:120]
+    period_start = _iso_timestamp(data.get("current_period_start") or data.get("started_at"))
+    period_end = _iso_timestamp(data.get("current_period_end"))
+    is_new_payment = (
+        event_type == "membership.started" or existing is None
+        or bool(period_start and period_start != existing.get("current_period_start"))
     )
-    store.assign_agents(task_id, [agent.id for agent in load_agents()])
+
+    if existing is None:
+        store.create_task(
+            f"Paid customer onboarding for {product_name}: prepare a safe, evidence-led product onboarding workflow. "
+            "No customer credentials, direct device access, configuration changes, or external actions are permitted.",
+            task_id=task_id,
+        )
+        store.assign_agents(task_id, ["ceo", "product_business", "network_infrastructure", "qa_testing"])
+
     membership = {
         "subscription_id": subscription_id,
         "supporter_email": data.get("supporter_email"),
         "supporter_name": data.get("supporter_name"),
         "membership_level_id": level_id,
         "membership_level_name": data.get("membership_level_name"),
-        "amount": float(amount),
-        "currency": currency,
-        "status": "active",
-        "current_period_end": _iso_timestamp(data.get("current_period_end")),
-        "task_id": task_id,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "amount": float(amount), "currency": currency, "status": "active",
+        "current_period_start": period_start, "current_period_end": period_end,
+        "task_id": task_id, "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     store.upsert_membership(membership)
-    store.record_payment_event(event_key, event_type, subscription_id)
-    # Unique provider event ID is the financial ledger idempotency key.
-    # The webhook event row remains the processing/audit record; ledger insertion
-    # returns a row only for the first delivery, preventing duplicate sale alerts.
+
+    if not is_new_payment:
+        store.record_payment_event(event_key, event_type, subscription_id)
+        return {"ok": True, "membership_status": "updated", "payment_recorded": False}
+
     gross = amount
     platform_fee = (gross * Decimal("0.05")).quantize(Decimal("0.01"))
     processing_fee = (gross * Decimal("0.034") + Decimal("0.30")).quantize(Decimal("0.01"))
     payout_fee_estimate = (gross * Decimal("0.005")).quantize(Decimal("0.01"))
     ledger_row = {
         "event_id": event_key, "event_type": event_type,
-        "subscription_id": subscription_id, "product_code": "netcmd_pro",
+        "subscription_id": subscription_id, "product_code": product_code,
         "gross_amount": str(gross), "currency": currency,
         "platform_fee_amount": str(platform_fee),
         "processing_fee_estimate": str(processing_fee),
         "net_estimate": str(gross - platform_fee - processing_fee - payout_fee_estimate),
         "entry_status": "recognized_estimate",
-        "provider_created_at": _iso_timestamp(event.get("created")),
-        "raw_event": event,
+        "provider_created_at": _iso_timestamp(event.get("created")), "raw_event": event,
     }
     try:
         if hasattr(store, "_request"):
@@ -566,9 +840,8 @@ async def buymeacoffee_webhook(request: Request,
                 cur = db.execute("""INSERT OR IGNORE INTO payment_ledger
                     (event_id,event_type,subscription_id,product_code,gross_amount,currency,
                      platform_fee_amount,processing_fee_estimate,net_estimate,entry_status,
-                     provider_created_at,raw_event)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (event_key,event_type,subscription_id,"netcmd_pro",float(gross),currency,
+                     provider_created_at,raw_event) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (event_key,event_type,subscription_id,product_code,float(gross),currency,
                      float(platform_fee),float(processing_fee),
                      float(gross-platform_fee-processing_fee-payout_fee_estimate),
                      "recognized_estimate",_iso_timestamp(event.get("created")),json.dumps(event)))
@@ -576,14 +849,48 @@ async def buymeacoffee_webhook(request: Request,
     except Exception as exc:
         print(f"payment_ledger: write failed; error_type={type(exc).__name__}", flush=True)
         raise HTTPException(status_code=503, detail="Payment ledger temporarily unavailable.")
+
+    # Record the event only after the ledger write succeeds, so a transient ledger
+    # failure can be retried by the provider without losing the financial event.
     store.record_payment_event(event_key, event_type, subscription_id)
-    # Never send a second sale notification for a provider retry.
+
+    delivery_status = "no_product_mapping"
+    if product_id:
+        release = store.get_product_release(product_id)
+        if not release:
+            delivery_status = "blocked_missing_release"
+            await asyncio.to_thread(
+                notify_owner,
+                f"💳 Ödeme alındı ancak BMC eşlemesindeki ürün bulunamadı.\nÜrün ID: {product_id}"
+            )
+        else:
+            entitlement_result = store.create_product_entitlement(
+                event_key, subscription_id, product_id,
+                membership.get("supporter_email"), membership.get("supporter_name"),
+            )
+            entitlement = entitlement_result.get("entitlement") if entitlement_result else None
+            if entitlement:
+                delivery_status = await _deliver_product_entitlement(entitlement, release)
+                if delivery_status == "pending":
+                    await asyncio.to_thread(
+                        notify_owner,
+                        f"💳 Ödeme alındı; ürün teslimatı yayın onayını bekliyor.\n"
+                        f"Ürün: {release['name']}\nAbonelik: {subscription_id}\n"
+                        f"Ürünü yayınladıktan sonra /api/payments/entitlements/{subscription_id}/deliver çağrısını yapın."
+                    )
+    else:
+        await asyncio.to_thread(
+            notify_owner,
+            f"💳 BMC ödemesi alındı ancak BMC_PRODUCT_LEVEL_MAP içinde ürün ID eşlemesi yok.\n"
+            f"Level ID: {level_id}\nAlıcı: {membership.get('supporter_email') or 'e-posta yok'}"
+        )
+
     if first_financial_record:
+        membership["delivery_status"] = delivery_status
         await asyncio.to_thread(notify_sale, event_type, membership)
 
     return {"ok": True, "membership_status": "active", "task_id": task_id,
-            "assigned_agents": len(load_agents())}
-
+            "assigned_agents": 4, "delivery_status": delivery_status}
 
 
 class ProviderPayoutInput(BaseModel):
@@ -756,6 +1063,7 @@ def product_factory_status():
         "generation_requires_provider": provider_status()["ready"],
         "source_execution": False,
         "release_status": "review_required",
+        "artifact_storage": "Supabase/SQLite database with a 1.5 MB per-release cap",
     }
 
 
@@ -774,14 +1082,68 @@ def product_factory_build(payload: ProductBuildInput):
     if not provider_status()["ready"]:
         raise HTTPException(status_code=503, detail="No AI provider is configured.")
     try:
-        return build_product(payload.name, payload.description,
-                             payload.product_type, payload.version)
+        release = build_product(payload.name, payload.description,
+                                payload.product_type, payload.version)
+        with open(release["download_path"], "rb") as artifact_file:
+            store.save_product_release(release, artifact_file.read())
+        return {k: v for k, v in release.items()
+                if k not in {"download_path", "checksum_path", "backup_path"}}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.post("/api/factory/products/{product_id}/publish", dependencies=[Depends(require_api_key)])
+def product_factory_publish(product_id: str, payload: ProductPublishInput):
+    release = store.get_product_release(product_id)
+    if not release:
+        raise HTTPException(status_code=404, detail="Product release not found.")
+    scope = {"product_id": product_id, "sha256": release["sha256"]}
+    require_action_approval("publish_product", payload.approval_id, scope)
+    updated = store.update_product_release_status(product_id, "approved_for_sale")
+    if not updated:
+        raise HTTPException(status_code=503, detail="Could not update product release status.")
+    return {"ok": True, "product_id": product_id, "release_status": "approved_for_sale"}
+
+
+@app.get("/download/{token}")
+def download_product(token: str):
+    if not token or len(token) > 160:
+        raise HTTPException(status_code=404, detail="Download not found or expired.")
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    item = store.consume_product_download(token_hash)
+    if not item:
+        raise HTTPException(status_code=404, detail="Download not found, expired, or exhausted.")
+    try:
+        artifact = base64.b64decode(item["artifact_base64"], validate=True)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=503, detail="Stored product artifact is corrupt.") from exc
+    if hashlib.sha256(artifact).hexdigest() != item["sha256"] or len(artifact) != item["artifact_bytes"]:
+        raise HTTPException(status_code=503, detail="Stored product artifact failed integrity verification.")
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "-", str(item["name"]))[:60] or "product"
+    filename = f"{safe_name}-v{item['version']}.zip"
+    return Response(
+        content=artifact,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/api/factory/products", dependencies=[Depends(require_api_key)])
+def product_factory_list():
+    return {"products": store.list_product_releases(limit=50)}
+
+
 @app.get("/api/factory/products/{product_id}", dependencies=[Depends(require_api_key)])
 def product_factory_detail(product_id: str):
+    item = store.get_product_release(product_id)
+    if item:
+        manifest = item.get("manifest_json") or {}
+        return {**manifest, "release_status": item["release_status"],
+                "checksum": item["sha256"], "artifact_bytes": item["artifact_bytes"]}
     try:
         return product_metadata(product_id)
     except FileNotFoundError:
@@ -790,6 +1152,21 @@ def product_factory_detail(product_id: str):
 
 @app.get("/api/factory/products/{product_id}/download", dependencies=[Depends(require_api_key)])
 def product_factory_download(product_id: str):
+    item = store.get_product_release(product_id)
+    if item:
+        try:
+            artifact = base64.b64decode(item["artifact_base64"], validate=True)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=503, detail="Stored product artifact is corrupt.") from exc
+        digest = hashlib.sha256(artifact).hexdigest()
+        if digest != item["sha256"] or len(artifact) != item["artifact_bytes"]:
+            raise HTTPException(status_code=503, detail="Stored product artifact failed integrity verification.")
+        filename = f"{item['product_id']}-v{item['version']}.zip"
+        return Response(
+            content=artifact,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     try:
         path = product_zip_path(product_id)
     except FileNotFoundError:
@@ -803,7 +1180,7 @@ from company.crm import (
     upsert_contact as crm_upsert_contact, create_offer as crm_create_offer,
     suppress_contact as crm_suppress_contact, list_followups as crm_list_followups,
     record_mail as crm_record_mail, list_contacts as crm_list_contacts,
-    update_company_stage as crm_update_company_stage,
+    update_company_stage as crm_update_company_stage, verify_company as crm_verify_company,
 )
 
 class CRMCompanyInput(BaseModel):
@@ -859,8 +1236,9 @@ def crm_status():
     return {
         "enabled": True,
         "database": "supabase" if database_status()["backend"] == "supabase" else "sqlite",
-        "pipeline": ["TR+global research", "lead dedupe", "evidence capture", "fit scoring",
-                     "needs analysis", "personalized proposal", "draft+followup",
+        "pipeline": ["TR+global research", "SSRF-safe public source check", "lead dedupe",
+                     "human source verification", "fit scoring", "needs analysis",
+                     "qualified proposal draft+followup",
                      "inbound classification", "approved-facts replies", "suppression list"],
         "outbound_sending": False, "human_approval_required": True,
         "privacy": "public business sources only; no private personal-data scraping",
@@ -892,6 +1270,16 @@ def crm_add_contact(company_id: str, payload: CRMContactInput):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+@app.post("/api/crm/companies/{company_id}/verify", dependencies=[Depends(require_api_key)])
+def crm_verify(company_id: str):
+    try:
+        return crm_verify_company(company_id, store)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Company not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @app.patch("/api/crm/companies/{company_id}/stage", dependencies=[Depends(require_api_key)])
 def crm_set_stage(company_id: str, payload: CRMStageInput):
     try:
@@ -900,6 +1288,8 @@ def crm_set_stage(company_id: str, payload: CRMStageInput):
         raise HTTPException(status_code=404, detail="Company not found")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 @app.post("/api/crm/companies/{company_id}/offer", dependencies=[Depends(require_api_key)])
 def crm_offer(company_id: str, product_name: str = "NetCmd PRO"):

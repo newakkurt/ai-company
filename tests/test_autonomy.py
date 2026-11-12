@@ -13,7 +13,7 @@ import app
 from company import agent_runner, notifier, scheduler
 from company.agents import load_agents
 from company.llm import GeminiProvider
-from company.mailbox import MailConfig, RateLimiter, classify, links_allowed, parse_message, process_inbox
+from company.mailbox import MailConfig, PersistentRateLimiter, classify, links_allowed, parse_message, process_inbox
 from company.store import TaskStore
 from company.worker import process_one_task
 
@@ -244,9 +244,11 @@ class WorkerNotificationTests(unittest.TestCase):
 # ---------------------------------------------------------------- mailbox
 
 def make_mail(sender="customer@example.com", subject="Question about NetCmd",
-              body="How do I get started with NetCmd?", extra_headers=None):
+              body="How do I get started with NetCmd?", extra_headers=None,
+              message_id="<abc123@example.com>"):
     lines = [f"From: Customer <{sender}>", "To: support@company.test", f"Subject: {subject}",
-             "Message-ID: <abc123@example.com>", "Content-Type: text/plain; charset=utf-8"]
+             f"Message-ID: {message_id}", "Authentication-Results: mx.google.com; dkim=pass; spf=pass; dmarc=pass",
+             "Content-Type: text/plain; charset=utf-8"]
     lines += [f"{k}: {v}" for k, v in (extra_headers or {}).items()]
     return ("\r\n".join(lines) + "\r\n\r\n" + body).encode()
 
@@ -305,15 +307,18 @@ def cfg(mode="draft", **kw):
 class MailboxTests(unittest.TestCase):
     def setUp(self):
         FakeSmtp.sent = []
-        import company.mailbox as mb
-        mb._LIMITER = None
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = TaskStore(Path(self.tmp.name) / "mailbox.db")
+
+    def tearDown(self):
+        self.tmp.cleanup()
 
     def run_inbox(self, messages, config=None, provider=None):
         imap = FakeImap(messages)
         notifier_mock = Mock()
         stats = process_inbox(config or cfg(), provider or DraftingProvider(),
                               imap_factory=lambda _c: imap, smtp_factory=lambda _c: FakeSmtp(),
-                              notifier=notifier_mock)
+                              notifier=notifier_mock, store=self.store)
         return stats, imap, notifier_mock
 
     def test_classification(self):
@@ -381,7 +386,7 @@ class MailboxTests(unittest.TestCase):
         self.assertFalse(links_allowed("see https://buymeacoffee.com.evil.io/x", ("https://buymeacoffee.com/sevketkaynar",)))
 
     def test_per_sender_cap_blocks_third_auto_reply(self):
-        mails = [make_mail() for _ in range(3)]
+        mails = [make_mail(message_id=f"<message-{i}@example.com>") for i in range(3)]
         stats, *_ = self.run_inbox(mails, cfg("auto_reply"))
         self.assertEqual(stats["replied"], 2)
         self.assertEqual(stats["escalated"], 1)
@@ -394,11 +399,12 @@ class MailboxTests(unittest.TestCase):
     def test_unconfigured_mailbox_is_a_noop(self):
         self.assertEqual(process_inbox(MailConfig())["status"], "not_configured")
 
-    def test_rate_limiter_daily_total(self):
-        limiter = RateLimiter(max_per_day=1, max_per_sender=5)
-        self.assertTrue(limiter.allow("a@x"))
-        limiter.record("a@x")
-        self.assertFalse(limiter.allow("b@x"))
+    def test_rate_limiter_daily_total_is_persistent(self):
+        cfg_value = MailConfig(max_per_day=1, max_per_sender_per_day=5)
+        limiter = PersistentRateLimiter(self.store, cfg_value)
+        self.assertTrue(limiter.reserve("a@x", "message-1"))
+        limiter.sent("message-1")
+        self.assertFalse(limiter.reserve("b@x", "message-2"))
 
 
 # ---------------------------------------------------------------- webhook
@@ -465,6 +471,102 @@ class SaleWebhookTests(unittest.TestCase):
         with patch("app.notify_cancellation") as cancel:
             self.call(self.event(event_id="e2", type="membership.cancelled"))
         cancel.assert_called_once()
+
+
+
+    def test_membership_updated_without_new_cycle_is_not_a_second_sale(self):
+        start = self.event(current_period_start="2026-11-01T00:00:00Z")
+        update = self.event(event_id="e2", type="membership.updated",
+                            current_period_start="2026-11-01T00:00:00Z")
+        with patch("app.notify_sale") as sale:
+            self.call(start)
+            result = self.call(update)
+        self.assertFalse(result["payment_recorded"])
+        sale.assert_called_once()
+
+    def test_membership_updated_with_new_cycle_records_a_renewal(self):
+        start = self.event(current_period_start="2026-11-01T00:00:00Z")
+        update = self.event(event_id="e2", type="membership.updated",
+                            current_period_start="2026-12-01T00:00:00Z")
+        with patch("app.notify_sale") as sale:
+            self.call(start)
+            result = self.call(update)
+        self.assertTrue(result["membership_status"] == "active")
+        self.assertEqual(sale.call_count, 2)
+        with self.store._connect() as db:
+            count = db.execute("SELECT COUNT(*) FROM payment_ledger").fetchone()[0]
+        self.assertEqual(count, 2)
+
+    def _extra_event(self, event_type="extra_purchase.created", event_id="extra-event-1"):
+        return {
+            "event_id": event_id, "type": event_type, "live_mode": True, "created": 1730000000,
+            "data": {
+                "id": 98765, "object": "payment", "transaction_id": "pi_extra_98765",
+                "status": "succeeded" if event_type == "extra_purchase.created" else "refunded",
+                "refunded": "true" if event_type.endswith(".refunded") else "false",
+                "amount": 30.0, "currency": "USD", "application_fee": 1.5,
+                "support_type": "Extra", "supporter_name": "Buyer",
+                "supporter_email": "buyer@example.com", "created_at": 1730000000,
+                "extras": [{
+                    "id": 594541, "object": "extra", "title": "NetCmd PRO",
+                    "description": "Network automation toolkit", "amount": 30.0,
+                    "quantity": 1, "currency": "USD",
+                }],
+            },
+        }
+
+    def _save_approved_release(self):
+        artifact = b"sample-product-zip"
+        digest = hashlib.sha256(artifact).hexdigest()
+        release = {
+            "product_id": "prd-594541abcdef", "name": "NetCmd PRO",
+            "version": "1.0.0", "summary": "Network automation toolkit",
+            "release_status": "review_required", "checksum": digest,
+        }
+        self.store.save_product_release(release, artifact)
+        self.store.update_product_release_status(release["product_id"], "approved_for_sale")
+        return release
+
+    def test_extra_purchase_created_delivers_shop_product_once(self):
+        release = self._save_approved_release()
+        mapping = {"594541": {
+            "product_id": release["product_id"], "product_code": "netcmd_pro",
+            "product_name": "NetCmd PRO", "price_usd": "30.00",
+        }}
+        with patch.dict(os.environ, {"BMC_EXTRA_PRODUCT_MAP": json.dumps(mapping)}), \
+             patch("app.send_product_delivery_email", return_value=True) as send, \
+             patch("app.notify_sale") as sale:
+            result = self.call(self._extra_event())
+            duplicate = self.call(self._extra_event(event_id="extra-event-retry"))
+        self.assertEqual(result["items_processed"], 1)
+        self.assertEqual(result["items"][0]["delivery_status"], "sent")
+        self.assertTrue(duplicate["duplicate"])
+        send.assert_called_once()
+        sale.assert_called_once()
+        with self.store._connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM payment_ledger").fetchone()[0], 1)
+            entitlement = db.execute("SELECT * FROM product_entitlements").fetchone()
+        self.assertEqual(entitlement["delivery_status"], "sent")
+
+    def test_extra_purchase_refund_revokes_download_entitlement(self):
+        release = self._save_approved_release()
+        mapping = {"594541": {
+            "product_id": release["product_id"], "product_code": "netcmd_pro",
+            "product_name": "NetCmd PRO", "price_usd": "30.00",
+        }}
+        with patch.dict(os.environ, {"BMC_EXTRA_PRODUCT_MAP": json.dumps(mapping)}), \
+             patch("app.send_product_delivery_email", return_value=True), \
+             patch("app.notify_sale"), patch("app.notify_unexpected_payment"):
+            self.call(self._extra_event())
+            self.call(self._extra_event("extra_purchase.refunded", "extra-refund-1"))
+        with self.store._connect() as db:
+            row = db.execute("SELECT status FROM product_entitlements").fetchone()
+        self.assertEqual(row["status"], "refunded")
+
+    def test_bmc_product_map_is_parsed_from_json(self):
+        mapping = {"99": {"product_id": "prd-abcdef123456", "price_usd": "30.00"}}
+        with patch.dict(os.environ, {"BMC_PRODUCT_LEVEL_MAP": json.dumps(mapping)}):
+            self.assertEqual(app._load_bmc_product_level_map(), mapping)
 
 
 class ServicesStatusTests(unittest.TestCase):

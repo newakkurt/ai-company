@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
+import base64
+import hashlib
 import os
 import sqlite3
 import uuid
@@ -15,6 +17,7 @@ DB_PATH = ROOT / "data" / "company.db"
 # comfortably exceed the slowest single LLM call (retries and timeouts included),
 # otherwise a second worker re-claims a task that is still being processed.
 STALE_LEASE_MINUTES = 15
+MAX_PRODUCT_ARTIFACT_BYTES = 1_500_000
 
 
 def utc_now() -> str:
@@ -186,6 +189,14 @@ class SupabaseTaskStore:
         self._event(task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
         return task_id
 
+    def heartbeat_task(self, task_id: str) -> bool:
+        """Extend a running task's quiet lease while a worker is still alive."""
+        rows = self._request("tasks", "PATCH", {
+            "task_id": f"eq.{task_id}", "status": "eq.running",
+            "execution_mode": "eq.dry_run",
+        }, {"updated_at": utc_now()}, "return=representation")
+        return bool(rows)
+
     def requeue_stale_tasks(self, stale_minutes: int = STALE_LEASE_MINUTES):
         """Recover interrupted dry-run tasks after a quiet lease window."""
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
@@ -314,6 +325,157 @@ class SupabaseTaskStore:
         return rows
 
 
+
+    def reserve_mail_send(self, message_id: str, sender: str, max_total: int, max_sender: int) -> bool:
+        if not message_id or not sender:
+            return False
+        existing = self._request("mail_send_log", params={
+            "select": "message_id", "message_id": f"eq.{message_id}", "limit": "1",
+        })
+        if existing:
+            return False
+        now = datetime.now(timezone.utc)
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        rows = self._request("mail_send_log", params={
+            "select": "message_id,sender_email", "status": "in.(reserved,sent)",
+            "reserved_at": f"gte.{day_start}", "limit": "1000",
+        })
+        if len(rows) >= max_total:
+            return False
+        if sum(1 for row in rows if row.get("sender_email", "").casefold() == sender.casefold()) >= max_sender:
+            return False
+        created = self._request("mail_send_log", "POST", {"on_conflict": "message_id"}, {
+            "message_id": message_id, "sender_email": sender.casefold(),
+            "status": "reserved", "reserved_at": now.isoformat(),
+        }, "resolution=ignore-duplicates,return=representation")
+        return bool(created)
+
+    def update_mail_send(self, message_id: str, status: str, error_type: str | None = None):
+        if status not in ("sent", "failed"):
+            raise ValueError("Invalid mail send status")
+        return self._request("mail_send_log", "PATCH", {
+            "message_id": f"eq.{message_id}", "status": "eq.reserved",
+        }, {"status": status, "sent_at": utc_now() if status == "sent" else None,
+            "error_type": error_type}, "return=minimal")
+
+
+    def update_product_release_status(self, product_id: str, status: str):
+        if status not in ("review_required", "approved_for_sale", "withdrawn"):
+            raise ValueError("Invalid product release status")
+        rows = self._request("product_releases", "PATCH", {
+            "product_id": f"eq.{product_id}",
+        }, {"release_status": status}, "return=representation")
+        return rows[0] if rows else None
+
+    def create_product_entitlement(self, event_id: str, subscription_id: str,
+                                   product_id: str, buyer_email: str | None,
+                                   buyer_name: str | None):
+        item = {
+            "entitlement_id": f"ent-{uuid.uuid4().hex}",
+            "event_id": event_id, "subscription_id": subscription_id,
+            "product_id": product_id, "buyer_email": buyer_email,
+            "buyer_name": buyer_name, "status": "active",
+            "delivery_status": "pending", "created_at": utc_now(),
+            "updated_at": utc_now(),
+        }
+        inserted = self._request("product_entitlements", "POST", {
+            "on_conflict": "subscription_id",
+        }, item, "resolution=ignore-duplicates,return=representation")
+        if inserted:
+            return {"created": True, "entitlement": inserted[0]}
+        existing = self._request("product_entitlements", params={
+            "select": "*", "subscription_id": f"eq.{subscription_id}", "limit": "1",
+        })
+        return {"created": False, "entitlement": existing[0] if existing else None}
+
+    def get_product_entitlement_by_subscription(self, subscription_id: str):
+        rows = self._request("product_entitlements", params={
+            "select": "*", "subscription_id": f"eq.{subscription_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
+    def get_product_download_token_for_entitlement(self, entitlement_id: str):
+        rows = self._request("product_download_tokens", params={
+            "select": "token_hash,status,download_count,max_downloads,expires_at",
+            "entitlement_id": f"eq.{entitlement_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
+    def get_product_entitlement(self, entitlement_id: str):
+        rows = self._request("product_entitlements", params={
+            "select": "*", "entitlement_id": f"eq.{entitlement_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
+    def update_product_entitlement_status(self, subscription_id: str, status: str):
+        if status not in ("active", "paused", "cancelled", "refunded", "revoked"):
+            raise ValueError("Invalid entitlement status")
+        return self._request("product_entitlements", "PATCH", {
+            "subscription_id": f"eq.{subscription_id}",
+        }, {"status": status, "updated_at": utc_now()}, "return=minimal")
+
+    def update_product_entitlement_delivery(self, entitlement_id: str, status: str):
+        if status not in ("pending", "sent", "manual_required", "failed"):
+            raise ValueError("Invalid delivery status")
+        return self._request("product_entitlements", "PATCH", {
+            "entitlement_id": f"eq.{entitlement_id}",
+        }, {"delivery_status": status,
+            "delivered_at": utc_now() if status == "sent" else None,
+            "updated_at": utc_now()}, "return=minimal")
+
+    def create_product_download_token(self, entitlement_id: str, token_hash: str,
+                                      expires_at: str, max_downloads: int = 5):
+        rows = self._request("product_download_tokens", "POST", {
+            "on_conflict": "entitlement_id",
+        }, {"token_hash": token_hash, "entitlement_id": entitlement_id,
+            "expires_at": expires_at, "max_downloads": max_downloads,
+            "download_count": 0, "status": "active", "created_at": utc_now()},
+            "resolution=ignore-duplicates,return=representation")
+        return bool(rows)
+
+    def consume_product_download(self, token_hash: str):
+        result = self._request("rpc/consume_product_download", "POST",
+                               body={"p_token_hash": token_hash})
+        if isinstance(result, list):
+            return result[0] if result else None
+        return result if isinstance(result, dict) and result else None
+
+    def save_product_release(self, release: dict, artifact: bytes):
+        if not isinstance(artifact, bytes) or not artifact or len(artifact) > MAX_PRODUCT_ARTIFACT_BYTES:
+            raise ValueError("Product artifact is empty or exceeds the 1.5 MB storage limit")
+        digest = hashlib.sha256(artifact).hexdigest()
+        if release.get("checksum") and release["checksum"] != digest:
+            raise ValueError("Product artifact checksum does not match release metadata")
+        manifest = {k: v for k, v in release.items()
+                    if k not in {"download_path", "checksum_path", "backup_path"}}
+        item = {
+            "product_id": release["product_id"],
+            "name": release["name"],
+            "version": release["version"],
+            "summary": release.get("summary", ""),
+            "release_status": release.get("release_status", "review_required"),
+            "manifest_json": manifest,
+            "artifact_base64": base64.b64encode(artifact).decode("ascii"),
+            "sha256": digest,
+            "artifact_bytes": len(artifact),
+            "created_at": release.get("created_at") or utc_now(),
+        }
+        self._request("product_releases", "POST", {"on_conflict": "product_id"}, item,
+                     "resolution=merge-duplicates,return=minimal")
+        return self.get_product_release(item["product_id"])
+
+    def get_product_release(self, product_id: str):
+        rows = self._request("product_releases", params={
+            "select": "*", "product_id": f"eq.{product_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
+    def list_product_releases(self, limit: int = 50):
+        return self._request("product_releases", params={
+            "select": "product_id,name,version,summary,release_status,sha256,artifact_bytes,created_at",
+            "order": "created_at.desc", "limit": str(max(1, min(limit, 100))),
+        })
+
     def create_approval_request(self, action: str, scope: dict, requested_by: str, expires_hours: int = 24):
         now = datetime.now(timezone.utc)
         item = {
@@ -438,6 +600,42 @@ class TaskStore:
                     output_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
                     agent_id TEXT NOT NULL, output_text TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS mail_send_log (
+                    message_id TEXT PRIMARY KEY, sender_email TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'reserved'
+                        CHECK(status IN ('reserved','sent','failed')),
+                    reserved_at TEXT NOT NULL, sent_at TEXT, error_type TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_mail_send_log_daily
+                    ON mail_send_log(reserved_at, status, sender_email);
+                CREATE TABLE IF NOT EXISTS product_releases (
+                    product_id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL,
+                    summary TEXT NOT NULL, release_status TEXT NOT NULL DEFAULT 'review_required',
+                    manifest_json TEXT NOT NULL, artifact_base64 TEXT NOT NULL,
+                    sha256 TEXT NOT NULL, artifact_bytes INTEGER NOT NULL CHECK(artifact_bytes > 0 AND artifact_bytes <= 1500000),
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_product_releases_created
+                    ON product_releases(created_at);
+
+                CREATE TABLE IF NOT EXISTS product_entitlements (
+                    entitlement_id TEXT PRIMARY KEY, event_id TEXT NOT NULL UNIQUE,
+                    subscription_id TEXT NOT NULL UNIQUE, product_id TEXT NOT NULL,
+                    buyer_email TEXT, buyer_name TEXT, status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active','paused','cancelled','refunded','revoked')),
+                    delivery_status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(delivery_status IN ('pending','sent','manual_required','failed')),
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, delivered_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_product_entitlements_buyer
+                    ON product_entitlements(buyer_email, created_at);
+                CREATE TABLE IF NOT EXISTS product_download_tokens (
+                    token_hash TEXT PRIMARY KEY, entitlement_id TEXT NOT NULL UNIQUE,
+                    expires_at TEXT NOT NULL, max_downloads INTEGER NOT NULL DEFAULT 5,
+                    download_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active','revoked')),
+                    created_at TEXT NOT NULL, last_downloaded_at TEXT
+                );
                 CREATE TABLE IF NOT EXISTS approval_requests (
                     approval_id TEXT PRIMARY KEY, action TEXT NOT NULL, scope_json TEXT NOT NULL,
                     requested_by TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending'
@@ -460,7 +658,7 @@ class TaskStore:
                     subscription_id TEXT PRIMARY KEY, supporter_email TEXT,
                     supporter_name TEXT, membership_level_id INTEGER NOT NULL,
                     membership_level_name TEXT, amount REAL NOT NULL, currency TEXT NOT NULL,
-                    status TEXT NOT NULL, current_period_end TEXT, task_id TEXT,
+                    status TEXT NOT NULL, current_period_start TEXT, current_period_end TEXT, task_id TEXT,
                     updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -469,6 +667,9 @@ class TaskStore:
                 CREATE INDEX IF NOT EXISTS idx_agent_outputs_task ON agent_outputs(task_id);
                 CREATE INDEX IF NOT EXISTS idx_knowledge_created ON knowledge_notes(created_at);
             """)
+        columns = {row[1] for row in db.execute("PRAGMA table_info(memberships)").fetchall()}
+        if "current_period_start" not in columns:
+            db.execute("ALTER TABLE memberships ADD COLUMN current_period_start TEXT")
 
     def create_task(self, description: str, task_id: str | None = None) -> dict:
         description = description.strip()
@@ -507,17 +708,18 @@ class TaskStore:
 
     def upsert_membership(self, membership: dict):
         fields = ("subscription_id","supporter_email","supporter_name","membership_level_id",
-                  "membership_level_name","amount","currency","status","current_period_end","task_id","updated_at")
+                  "membership_level_name","amount","currency","status","current_period_start","current_period_end","task_id","updated_at")
         values = [membership.get(field) for field in fields]
         with self._connect() as db:
             db.execute(
                 """INSERT INTO memberships (subscription_id,supporter_email,supporter_name,membership_level_id,
-                membership_level_name,amount,currency,status,current_period_end,task_id,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(subscription_id) DO UPDATE SET
+                membership_level_name,amount,currency,status,current_period_start,current_period_end,task_id,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(subscription_id) DO UPDATE SET
                 supporter_email=excluded.supporter_email,supporter_name=excluded.supporter_name,
                 membership_level_id=excluded.membership_level_id,membership_level_name=excluded.membership_level_name,
                 amount=excluded.amount,currency=excluded.currency,status=excluded.status,
-                current_period_end=excluded.current_period_end,task_id=excluded.task_id,updated_at=excluded.updated_at""",
+                current_period_start=excluded.current_period_start,current_period_end=excluded.current_period_end,
+                task_id=excluded.task_id,updated_at=excluded.updated_at""",
                 values
             )
         return self.get_membership(membership["subscription_id"])
@@ -615,6 +817,15 @@ class TaskStore:
             db.execute("UPDATE assignments SET status='running' WHERE task_id=? AND status='suggested'", (task_id,))
             self._event(db, task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
             return task_id
+
+    def heartbeat_task(self, task_id: str) -> bool:
+        """Extend a running task's quiet lease while a worker is still alive."""
+        with self._connect() as db:
+            changed = db.execute(
+                "UPDATE tasks SET updated_at=? WHERE task_id=? AND status='running' AND execution_mode='dry_run'",
+                (utc_now(), task_id),
+            ).rowcount
+        return changed == 1
 
     def requeue_stale_tasks(self, stale_minutes: int = STALE_LEASE_MINUTES):
         """Recover interrupted dry-run tasks after a quiet lease window."""
@@ -759,6 +970,190 @@ class TaskStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+
+
+    def reserve_mail_send(self, message_id: str, sender: str, max_total: int, max_sender: int) -> bool:
+        if not message_id or not sender:
+            return False
+        now = datetime.now(timezone.utc)
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        with self._connect() as db:
+            existing = db.execute(
+                "SELECT message_id FROM mail_send_log WHERE message_id=?", (message_id,)
+            ).fetchone()
+            if existing:
+                return False
+            rows = db.execute(
+                "SELECT sender_email FROM mail_send_log WHERE status IN ('reserved','sent') AND reserved_at>=?",
+                (day_start,),
+            ).fetchall()
+            if len(rows) >= max_total:
+                return False
+            if sum(1 for row in rows if row["sender_email"].casefold() == sender.casefold()) >= max_sender:
+                return False
+            db.execute(
+                "INSERT INTO mail_send_log(message_id,sender_email,status,reserved_at) VALUES(?,?,'reserved',?)",
+                (message_id, sender.casefold(), now.isoformat()),
+            )
+        return True
+
+    def update_mail_send(self, message_id: str, status: str, error_type: str | None = None):
+        if status not in ("sent", "failed"):
+            raise ValueError("Invalid mail send status")
+        with self._connect() as db:
+            db.execute(
+                """UPDATE mail_send_log SET status=?, sent_at=?, error_type=?
+                   WHERE message_id=? AND status='reserved'""",
+                (status, utc_now() if status == "sent" else None, error_type, message_id),
+            )
+        return True
+
+
+    def update_product_release_status(self, product_id: str, status: str):
+        if status not in ("review_required", "approved_for_sale", "withdrawn"):
+            raise ValueError("Invalid product release status")
+        with self._connect() as db:
+            db.execute("UPDATE product_releases SET release_status=? WHERE product_id=?",
+                       (status, product_id))
+        return self.get_product_release(product_id)
+
+    def create_product_entitlement(self, event_id: str, subscription_id: str,
+                                   product_id: str, buyer_email: str | None,
+                                   buyer_name: str | None):
+        entitlement_id = f"ent-{uuid.uuid4().hex}"
+        now = utc_now()
+        with self._connect() as db:
+            cur = db.execute(
+                """INSERT OR IGNORE INTO product_entitlements
+                   (entitlement_id,event_id,subscription_id,product_id,buyer_email,buyer_name,
+                    status,delivery_status,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,'active','pending',?,?)""",
+                (entitlement_id,event_id,subscription_id,product_id,buyer_email,buyer_name,now,now),
+            )
+        if cur.rowcount:
+            return {"created": True, "entitlement": self.get_product_entitlement(entitlement_id)}
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM product_entitlements WHERE subscription_id=?",
+                             (subscription_id,)).fetchone()
+        return {"created": False, "entitlement": dict(row) if row else None}
+
+    def get_product_entitlement_by_subscription(self, subscription_id: str):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM product_entitlements WHERE subscription_id=?",
+                             (subscription_id,)).fetchone()
+        return dict(row) if row else None
+
+    def get_product_download_token_for_entitlement(self, entitlement_id: str):
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT token_hash,status,download_count,max_downloads,expires_at
+                   FROM product_download_tokens WHERE entitlement_id=?""",
+                (entitlement_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_product_entitlement(self, entitlement_id: str):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM product_entitlements WHERE entitlement_id=?",
+                             (entitlement_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_product_entitlement_status(self, subscription_id: str, status: str):
+        if status not in ("active", "paused", "cancelled", "refunded", "revoked"):
+            raise ValueError("Invalid entitlement status")
+        with self._connect() as db:
+            db.execute("UPDATE product_entitlements SET status=?,updated_at=? WHERE subscription_id=?",
+                       (status, utc_now(), subscription_id))
+        return True
+
+    def update_product_entitlement_delivery(self, entitlement_id: str, status: str):
+        if status not in ("pending", "sent", "manual_required", "failed"):
+            raise ValueError("Invalid delivery status")
+        with self._connect() as db:
+            db.execute("UPDATE product_entitlements SET delivery_status=?,delivered_at=?,updated_at=? WHERE entitlement_id=?",
+                       (status, utc_now() if status == "sent" else None, utc_now(), entitlement_id))
+        return True
+
+    def create_product_download_token(self, entitlement_id: str, token_hash: str,
+                                      expires_at: str, max_downloads: int = 5):
+        with self._connect() as db:
+            cur = db.execute(
+                """INSERT OR IGNORE INTO product_download_tokens
+                   (token_hash,entitlement_id,expires_at,max_downloads,download_count,status,created_at)
+                   VALUES (?,?,?, ?,0,'active',?)""",
+                (token_hash,entitlement_id,expires_at,max_downloads,utc_now()),
+            )
+        return cur.rowcount == 1
+
+    def consume_product_download(self, token_hash: str):
+        now = datetime.now(timezone.utc)
+        with self._connect() as db:
+            token = db.execute("SELECT * FROM product_download_tokens WHERE token_hash=?",
+                               (token_hash,)).fetchone()
+            if token is None or token["status"] != "active" or token["download_count"] >= token["max_downloads"]:
+                return None
+            expires = datetime.fromisoformat(token["expires_at"].replace("Z", "+00:00"))
+            if expires <= now:
+                return None
+            entitlement = db.execute("SELECT * FROM product_entitlements WHERE entitlement_id=?",
+                                     (token["entitlement_id"],)).fetchone()
+            if entitlement is None or entitlement["status"] != "active":
+                return None
+            product = db.execute("SELECT * FROM product_releases WHERE product_id=? AND release_status='approved_for_sale'",
+                                 (entitlement["product_id"],)).fetchone()
+            if product is None:
+                return None
+            db.execute("UPDATE product_download_tokens SET download_count=download_count+1,last_downloaded_at=? WHERE token_hash=?",
+                       (now.isoformat(), token_hash))
+            item = dict(product)
+            item["manifest_json"] = json.loads(item["manifest_json"])
+            return item
+
+    def save_product_release(self, release: dict, artifact: bytes):
+        if not isinstance(artifact, bytes) or not artifact or len(artifact) > MAX_PRODUCT_ARTIFACT_BYTES:
+            raise ValueError("Product artifact is empty or exceeds the 1.5 MB storage limit")
+        digest = hashlib.sha256(artifact).hexdigest()
+        if release.get("checksum") and release["checksum"] != digest:
+            raise ValueError("Product artifact checksum does not match release metadata")
+        manifest = {k: v for k, v in release.items()
+                    if k not in {"download_path", "checksum_path", "backup_path"}}
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO product_releases
+                   (product_id,name,version,summary,release_status,manifest_json,
+                    artifact_base64,sha256,artifact_bytes,created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(product_id) DO UPDATE SET
+                     manifest_json=excluded.manifest_json,
+                     artifact_base64=excluded.artifact_base64,
+                     sha256=excluded.sha256,
+                     artifact_bytes=excluded.artifact_bytes""",
+                (release["product_id"], release["name"], release["version"],
+                 release.get("summary", ""), release.get("release_status", "review_required"),
+                 json.dumps(manifest, ensure_ascii=False),
+                 base64.b64encode(artifact).decode("ascii"), digest, len(artifact),
+                 release.get("created_at") or utc_now()),
+            )
+        return self.get_product_release(release["product_id"])
+
+    def get_product_release(self, product_id: str):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM product_releases WHERE product_id=?", (product_id,)).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["manifest_json"] = json.loads(item["manifest_json"])
+        return item
+
+    def list_product_releases(self, limit: int = 50):
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT product_id,name,version,summary,release_status,sha256,
+                          artifact_bytes,created_at
+                   FROM product_releases ORDER BY created_at DESC LIMIT ?""",
+                (max(1, min(limit, 100)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def create_approval_request(self, action: str, scope: dict, requested_by: str, expires_hours: int = 24):
         now = datetime.now(timezone.utc)

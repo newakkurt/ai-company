@@ -13,6 +13,7 @@ from .agent_runner import run_task
 from .llm import get_provider
 from .product_factory import build_product
 from .crm import upsert_company as crm_upsert_company
+from .source_verification import verify_public_source
 from .notifier import notify_owner, notify_task_failed, notify_task_result
 from .scheduler import seed_due_tasks
 from .store import TaskStore
@@ -100,6 +101,30 @@ def notify_due_followups(store=None, now=None):
     return sent
 
 
+def _start_task_heartbeat(store, task_id: str, interval_seconds: int = 60):
+    """Refresh the task's quiet lease while a long LLM run is still active."""
+    heartbeat = getattr(store, "heartbeat_task", None)
+    if not callable(heartbeat):
+        return None, None
+    stop_event = threading.Event()
+
+    def run():
+        while not stop_event.wait(interval_seconds):
+            try:
+                if not heartbeat(task_id):
+                    print(f"agent_worker: task lease no longer owned; task_id={task_id}", flush=True)
+                    return
+            except Exception as exc:  # noqa: BLE001 - heartbeat failures are visible but isolated
+                print(f"agent_worker: heartbeat failed; task_id={task_id}; error_type={type(exc).__name__}",
+                      file=sys.stderr, flush=True)
+
+    thread = threading.Thread(
+        target=run, name=f"ai-company-heartbeat-{task_id}", daemon=True
+    )
+    thread.start()
+    return stop_event, thread
+
+
 def process_one_task(store=None, provider=None):
     """Claim and execute at most one dry-run task, persisting every agent result."""
     store = store or TaskStore()
@@ -108,6 +133,7 @@ def process_one_task(store=None, provider=None):
         return {"status": "idle"}
 
     print(f"agent_worker: claimed task {task_id}", flush=True)
+    heartbeat_stop, heartbeat_thread = _start_task_heartbeat(store, task_id)
     try:
         results = run_task(task_id, store=store, provider=provider)
         # Save research leads only when the model emits the requested JSON block
@@ -134,6 +160,12 @@ def process_one_task(store=None, provider=None):
                         continue
                     if len(str(lead.get("source_name", "")).strip()) < 2:
                         continue
+                    verification = verify_public_source(source_url, str(lead.get("company_name", "")))
+                    if verification["source_validation_status"] in {"unsafe_url", "unreachable", "too_large", "redirect_limit"}:
+                        print("crm: prospect source rejected; status=" +
+                              verification["source_validation_status"], flush=True)
+                        continue
+                    lead.update(verification)
                     lead["source_type"] = "agent_research_unverified"
                     try:
                         crm_upsert_company(lead, store=store)
@@ -155,10 +187,15 @@ def process_one_task(store=None, provider=None):
                 version="0.1.0",
                 provider=provider or get_provider(),
             )
+            with open(release["download_path"], "rb") as artifact_file:
+                store.save_product_release(release, artifact_file.read())
             store.record_agent_output(
                 task_id, "product_factory",
-                "Generated release metadata (source not executed):\n"
-                + json.dumps(release, ensure_ascii=False, indent=2),
+                "Generated durable release metadata (source not executed):\n"
+                + json.dumps({
+                    k: v for k, v in release.items()
+                    if k not in {"download_path", "checksum_path", "backup_path"}
+                }, ensure_ascii=False, indent=2),
             )
             results.append({"agent_id": "product_factory", "output": json.dumps(release, ensure_ascii=False)})
         store.complete_task(task_id, output_count=len(results))
@@ -195,6 +232,11 @@ def process_one_task(store=None, provider=None):
             "task_id": task_id,
             "error_type": type(exc).__name__,
         }
+    finally:
+        if heartbeat_stop:
+            heartbeat_stop.set()
+        if heartbeat_thread and heartbeat_thread.is_alive():
+            heartbeat_thread.join(timeout=3)
 
 
 def run_forever(stop_event=None, poll_seconds: int = 15):
