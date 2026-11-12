@@ -1,0 +1,13 @@
+! SYNTHETIC TRAINING DATA — NOT A REAL CUSTOMER CONFIGURATION
+hostname LAB-SW-01
+aaa new-model
+aaa authentication login default local
+ntp server 192.0.2.10
+logging host 192.0.2.20
+snmp-server group NETOPS v3 priv
+ip ssh version 2
+spanning-tree bpduguard enable
+ip dhcp snooping
+interface GigabitEthernet1/0/1
+ switchport mode access
+ switchport port-security

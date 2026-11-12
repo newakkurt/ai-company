@@ -8,6 +8,7 @@ Bağımsız, modüler, 14 rol ajanlı ve insan-onaylı AI şirketi orkestrasyon 
 - Yerel bilgi hafızası: `remember` / `recall`.
 - Şeffaf anahtar-kelime yönlendirmesi ve isteğe bağlı yerel Ollama modeli.
 - İsteğe bağlı, izin listeli Telegram görev alımı.
+- Otonom günlük/haftalık görev üretici, web araştırması (kaynaklı), satış ve rapor bildirimleri (Telegram), gelen mail için taslak/cevap altyapısı. Kurulum: [docs/AUTONOMY_SETUP.md](docs/AUTONOMY_SETUP.md)
 
 **Önemli:** 14 rol tanımlı ve yerel modelle analiz yapabilecek altyapı hazırdır. Model bağlı değilken ajanlar arka planda bağımsız çalışan servisler değildir. Görev yönlendirme deterministiktir; LLM çıktıları öneridir, doğrulanmış gerçek değildir.
 

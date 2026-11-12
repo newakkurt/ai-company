@@ -51,7 +51,7 @@ The owner wants to monitor verified revenue and bank settlements, not manage dai
 - Never expose or copy bank account numbers, webhook secrets, API keys, service-role keys, passwords, or private customer data into prompts, logs, Git, reports, or agent memory.
 - Never mark a bank transfer paid based only on a customer clicking “paid”; owner/admin must verify the bank receipt.
 - Never initiate bank transfers, change payout details, issue refunds, spend money, buy ads, sign contracts, or make legal/tax representations.
-- Never send bulk unsolicited messages, spam, deceptive claims, or scrape login-protected sources. Outbound contact must use lawful, consent-aware channels, clear sender identity, opt-out handling, and configured rate limits. Until a compliant sending integration and permission controls are implemented, agents prepare drafts but do not send.
+- Never send bulk unsolicited messages, spam, deceptive claims, or scrape login-protected sources. Outbound contact must use lawful, consent-aware channels, clear sender identity, opt-out handling, and configured rate limits. Outbound cold contact remains draft-only. The only implemented sending path is replying to mail that was sent to us (`company/mailbox.py`): draft mode by default, `auto_reply` only by explicit owner opt-in, with sensitive-topic escalation, link allow-list and rate caps (see docs/AUTONOMY_SETUP.md).
 - Do not modify or deploy to existing NetCmd, NetControl, or paylasim-botu production systems without a separately scoped release authorization. Build and test new products in isolated resources.
 - Product releases must have passing tests, security review, rollback plan, and auditable release record. Production changes to protected existing projects require owner approval.
 

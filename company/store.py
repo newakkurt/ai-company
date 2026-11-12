@@ -215,6 +215,34 @@ class SupabaseTaskStore:
             details["error_summary"] = error_summary[:240]
         self._event(task_id, "agent_task_failed", "worker", details)
 
+    def requeue_failed_task(self, task_id: str, max_retries: int = 2, min_age_minutes: int = 30) -> bool:
+        """Bounded retry of a failed dry-run task. Saved agent outputs are reused on resume."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=min_age_minutes)).isoformat()
+        rows = self._request("tasks", params={
+            "select": "task_id", "task_id": f"eq.{task_id}", "status": "eq.failed",
+            "execution_mode": "eq.dry_run", "updated_at": f"lt.{cutoff}", "limit": "1",
+        })
+        if not rows:
+            return False
+        retries = self._request("events", params={
+            "select": "event_id", "task_id": f"eq.{task_id}",
+            "event_type": "eq.agent_task_retried",
+        })
+        if len(retries) >= max_retries:
+            return False
+        changed = self._request("tasks", "PATCH", {
+            "task_id": f"eq.{task_id}", "status": "eq.failed",
+        }, {"status": "planned", "updated_at": utc_now()}, "return=representation")
+        if not changed:
+            return False
+        self._request("assignments", "PATCH", {
+            "task_id": f"eq.{task_id}", "status": "eq.failed",
+        }, {"status": "suggested"}, "return=minimal")
+        self._event(task_id, "agent_task_retried", "scheduler", {
+            "attempt": len(retries) + 1, "max_retries": max_retries,
+        })
+        return True
+
     def remember(self, title: str, body: str, tags: list[str] | None = None):
         title, body = title.strip(), body.strip()
         if not title or not body:
@@ -540,6 +568,37 @@ class TaskStore:
             if error_summary:
                 details["error_summary"] = error_summary[:240]
             self._event(db, task_id, "agent_task_failed", "worker", details)
+
+    def requeue_failed_task(self, task_id: str, max_retries: int = 2, min_age_minutes: int = 30) -> bool:
+        """Bounded retry of a failed dry-run task. Saved agent outputs are reused on resume."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=min_age_minutes)).isoformat()
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT status, updated_at FROM tasks WHERE task_id=? AND execution_mode='dry_run'",
+                (task_id,)
+            ).fetchone()
+            if row is None or row["status"] != "failed" or row["updated_at"] >= cutoff:
+                return False
+            retries = db.execute(
+                "SELECT COUNT(*) FROM events WHERE task_id=? AND event_type='agent_task_retried'",
+                (task_id,)
+            ).fetchone()[0]
+            if retries >= max_retries:
+                return False
+            changed = db.execute(
+                "UPDATE tasks SET status='planned', updated_at=? WHERE task_id=? AND status='failed'",
+                (utc_now(), task_id)
+            ).rowcount
+            if not changed:
+                return False
+            db.execute(
+                "UPDATE assignments SET status='suggested' WHERE task_id=? AND status='failed'",
+                (task_id,)
+            )
+            self._event(db, task_id, "agent_task_retried", "scheduler", {
+                "attempt": retries + 1, "max_retries": max_retries,
+            })
+            return True
 
     def remember(self, title: str, body: str, tags: list[str] | None = None):
         title, body = title.strip(), body.strip()

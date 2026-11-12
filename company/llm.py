@@ -2,6 +2,7 @@
 import json
 import os
 import time
+from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -16,13 +17,34 @@ class GeminiProvider:
     DEFAULT_MODEL = "gemini-3.5-flash-lite"
     RETRYABLE_STATUS = {429, 500, 502, 503, 504}
     RETRY_DELAYS = (5, 15)
+    supports_search = True
 
     def __init__(self, api_key=None, model=None, timeout=45):
         self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
         self.model = model or os.getenv("AI_COMPANY_GEMINI_MODEL", self.DEFAULT_MODEL)
         self.timeout = timeout
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    @staticmethod
+    def _format_sources(candidate: dict) -> str:
+        """Render Google Search grounding sources with the access date (constitution: cite sources)."""
+        chunks = (candidate.get("groundingMetadata") or {}).get("groundingChunks") or []
+        seen, lines = set(), []
+        for chunk in chunks:
+            web = chunk.get("web") or {}
+            uri = str(web.get("uri") or "").strip()
+            if not uri or uri in seen:
+                continue
+            seen.add(uri)
+            title = " ".join(str(web.get("title") or uri).split())[:100]
+            lines.append(f"- {title}: {uri}")
+            if len(lines) >= 8:
+                break
+        if not lines:
+            return ""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return f"\n\nKaynaklar (Google Search grounding, erişim {today}):\n" + "\n".join(lines)
+
+    def generate(self, system_prompt: str, user_prompt: str, use_search: bool = False) -> str:
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not configured")
 
@@ -35,6 +57,8 @@ class GeminiProvider:
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
             "generationConfig": {"maxOutputTokens": 2048},
         }
+        if use_search:
+            payload["tools"] = [{"google_search": {}}]
         body = json.dumps(payload).encode("utf-8")
 
         for attempt in range(3):
@@ -124,6 +148,8 @@ class GeminiProvider:
         content = "\n".join(part.get("text", "") for part in parts).strip()
         if not content:
             raise GeminiAPIError("Gemini API returned an empty response.")
+        if use_search and candidates:
+            content += self._format_sources(candidates[0])
         return content
 
 
@@ -142,7 +168,10 @@ class GroqProvider:
         self.model = model or os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
         self.timeout = timeout
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    supports_search = False
+
+    def generate(self, system_prompt: str, user_prompt: str, use_search: bool = False) -> str:
+        # use_search is accepted for interface parity; Groq has no grounding tool.
         if not self.api_key:
             raise RuntimeError("GROQ_API_KEY is not configured")
         payload = {
@@ -187,12 +216,16 @@ class GroqProvider:
 class FallbackProvider:
     """Use Groq only when Gemini is temporarily unavailable or quota-limited."""
 
+    supports_search = True
+
     def __init__(self, primary, fallback):
         self.primary = primary
         self.fallback = fallback
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, use_search: bool = False) -> str:
         try:
+            if use_search:
+                return self.primary.generate(system_prompt, user_prompt, use_search=True)
             return self.primary.generate(system_prompt, user_prompt)
         except GeminiAPIError as exc:
             message = str(exc)

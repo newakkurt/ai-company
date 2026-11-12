@@ -1,6 +1,7 @@
 """Cloud API and minimal dashboard for the 14-role AI Company."""
 from __future__ import annotations
 
+import asyncio
 import hmac
 import hashlib
 import json
@@ -18,6 +19,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from company.agents import agent_summary, load_agents
+from company.mailbox import mail_status, run_mail_forever
+from company.notifier import (
+    notifier_configured,
+    notify_cancellation,
+    notify_sale,
+    notify_unexpected_payment,
+)
+from company.scheduler import auto_tasks_enabled
 from company.store import TaskStore
 from company.worker import run_forever
 
@@ -53,8 +62,10 @@ def start_embedded_worker() -> None:
         if _worker_thread and _worker_thread.is_alive():
             return
         missing = [key for key in (
-            "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY", "GEMINI_API_KEY"
+            "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY"
         ) if not os.getenv(key)]
+        if not (os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY")):
+            missing.append("GEMINI_API_KEY or GROQ_API_KEY")
         if missing:
             print("agent_worker: startup blocked; missing environment keys: " + ", ".join(missing), flush=True)
             return
@@ -76,6 +87,60 @@ def stop_embedded_worker() -> None:
     if thread and thread.is_alive():
         thread.join(timeout=25)
     print("agent_worker: embedded worker shutdown requested", flush=True)
+
+
+# --- Optional embedded services: owner mailbox loop and Telegram intake -------------
+_services_stop_event = threading.Event()
+_service_threads: dict[str, threading.Thread] = {}
+
+
+def _flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() == "true"
+
+
+def _run_telegram_intake(stop_event: threading.Event) -> None:
+    from company.telegram import TelegramIntake
+    try:
+        TelegramIntake().poll_forever(stop_event=stop_event)
+    except ValueError as exc:  # missing token / allow-list
+        print(f"telegram: intake not started: {exc}", flush=True)
+
+
+@app.on_event("startup")
+def start_embedded_services() -> None:
+    _services_stop_event.clear()
+    targets = {
+        "mail": (_flag("AI_COMPANY_EMBEDDED_MAIL"),
+                 lambda: run_mail_forever(stop_event=_services_stop_event)),
+        "telegram": (_flag("AI_COMPANY_EMBEDDED_TELEGRAM"),
+                     lambda: _run_telegram_intake(_services_stop_event)),
+    }
+    for name, (enabled, target) in targets.items():
+        existing = _service_threads.get(name)
+        if not enabled or (existing and existing.is_alive()):
+            continue
+        thread = threading.Thread(target=target, name=f"ai-company-{name}", daemon=True)
+        _service_threads[name] = thread
+        thread.start()
+
+
+@app.on_event("shutdown")
+def stop_embedded_services() -> None:
+    _services_stop_event.set()
+    for thread in _service_threads.values():
+        if thread.is_alive():
+            thread.join(timeout=10)
+
+
+def services_status() -> dict[str, Any]:
+    return {
+        "scheduler": {"enabled": auto_tasks_enabled()},
+        "notifier": {"configured": notifier_configured()},
+        "mail": {**mail_status(), "running": bool(
+            _service_threads.get("mail") and _service_threads["mail"].is_alive())},
+        "telegram": {"enabled": _flag("AI_COMPANY_EMBEDDED_TELEGRAM"), "running": bool(
+            _service_threads.get("telegram") and _service_threads["telegram"].is_alive())},
+    }
 
 
 class TaskInput(BaseModel):
@@ -145,6 +210,7 @@ def readiness():
         "provider": provider,
         "database": database,
         "worker": worker,
+        "services": services_status(),
         "mode": "analysis_only",
         "external_actions_enabled": False,
     }
@@ -217,7 +283,7 @@ def start_analysis(task_id: str):
     if item is None:
         raise HTTPException(status_code=404, detail="Task not found")
     if not provider_status()["ready"]:
-        raise HTTPException(status_code=503, detail="Gemini 3.8 Flash is not configured.")
+        raise HTTPException(status_code=503, detail="No AI provider (GEMINI_API_KEY / GROQ_API_KEY) is configured.")
     if item["status"] == "running":
         return {"task_id": task_id, "status": "running"}
     if item["status"] == "completed":
@@ -282,6 +348,7 @@ async def buymeacoffee_webhook(request: Request,
     supported = {"membership.started", "membership.updated", "membership.cancelled", "membership.paused"}
     if event_type not in supported:
         store.record_payment_event(event_key, event_type, None)
+        await asyncio.to_thread(notify_unexpected_payment, event_type, "desteklenmeyen olay türü", data)
         return {"ok": True, "ignored": "unsupported_event"}
 
     subscription_id = str(data.get("id") or data.get("psp_id") or "").strip()
@@ -297,6 +364,8 @@ async def buymeacoffee_webhook(request: Request,
             updated = {**existing, "status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
             store.upsert_membership(updated)
         store.record_payment_event(event_key, event_type, subscription_id)
+        if existing:
+            await asyncio.to_thread(notify_cancellation, safe_subscription_id, status)
         return {"ok": True, "membership_status": "updated" if existing else "not_found"}
 
     expected_level = os.getenv("BMC_PRO_MEMBERSHIP_LEVEL_ID", "").strip()
@@ -311,9 +380,16 @@ async def buymeacoffee_webhook(request: Request,
     currency = str(data.get("currency", "")).upper()
     if level_id != int(expected_level) or currency != "USD" or amount != expected_price:
         store.record_payment_event(event_key, event_type, subscription_id)
+        await asyncio.to_thread(
+            notify_unexpected_payment, event_type,
+            "plan/fiyat/para birimi yapılandırılmış NetCmd PRO ile eşleşmiyor", data,
+        )
         return {"ok": True, "ignored": "not_the_configured_netcmd_pro_plan"}
     if str(data.get("status", "active")).lower() not in {"active", "succeeded"}:
         store.record_payment_event(event_key, event_type, subscription_id)
+        await asyncio.to_thread(
+            notify_unexpected_payment, event_type, "üyelik durumu aktif değil", data,
+        )
         return {"ok": True, "ignored": "membership_not_active"}
 
     task = store.create_task(
@@ -337,6 +413,8 @@ async def buymeacoffee_webhook(request: Request,
     }
     store.upsert_membership(membership)
     store.record_payment_event(event_key, event_type, subscription_id)
+    # After the event is recorded: a failed notification must not trigger provider retries.
+    await asyncio.to_thread(notify_sale, event_type, membership)
 
     return {"ok": True, "membership_status": "active", "task_id": task_id,
             "assigned_agents": len(load_agents())}
