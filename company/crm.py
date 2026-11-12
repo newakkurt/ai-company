@@ -104,8 +104,10 @@ def list_companies(store=None, limit=100, query="", stage=None):
     params={"select":"*","order":"score.desc,updated_at.desc","limit":str(max(1,min(limit,250)))}
     if stage: params["stage"]=f"eq.{stage}"
     if query:
-        safe=query.replace("%","").replace(","," ")
-        params["or"]=f"(company_name.ilike.*{safe}*,country.ilike.*{safe}*,industry.ilike.*{safe}*)"
+        # Never interpolate PostgREST grammar characters from user input.
+        safe = re.sub(r"[^0-9a-zA-ZğüşöçıİĞÜŞÖÇ _-]", "", query)[:80].strip()
+        if safe:
+            params["or"] = f"(company_name.ilike.*{safe}*,country.ilike.*{safe}*,industry.ilike.*{safe}*)"
     return _db(store)._request("crm_companies",params=params)
 
 def upsert_contact(company_id: str | None, data: dict, store=None) -> dict:
