@@ -13,7 +13,7 @@ import app
 from company import agent_runner, notifier, scheduler
 from company.agents import load_agents
 from company.llm import GeminiProvider
-from company.mailbox import MailConfig, RateLimiter, classify, links_allowed, parse_message, process_inbox
+from company.mailbox import MailConfig, PersistentRateLimiter, classify, links_allowed, parse_message, process_inbox
 from company.store import TaskStore
 from company.worker import process_one_task
 
@@ -244,9 +244,11 @@ class WorkerNotificationTests(unittest.TestCase):
 # ---------------------------------------------------------------- mailbox
 
 def make_mail(sender="customer@example.com", subject="Question about NetCmd",
-              body="How do I get started with NetCmd?", extra_headers=None):
+              body="How do I get started with NetCmd?", extra_headers=None,
+              message_id="<abc123@example.com>"):
     lines = [f"From: Customer <{sender}>", "To: support@company.test", f"Subject: {subject}",
-             "Message-ID: <abc123@example.com>", "Content-Type: text/plain; charset=utf-8"]
+             f"Message-ID: {message_id}", "Authentication-Results: mx.google.com; dkim=pass; spf=pass; dmarc=pass",
+             "Content-Type: text/plain; charset=utf-8"]
     lines += [f"{k}: {v}" for k, v in (extra_headers or {}).items()]
     return ("\r\n".join(lines) + "\r\n\r\n" + body).encode()
 
@@ -305,15 +307,18 @@ def cfg(mode="draft", **kw):
 class MailboxTests(unittest.TestCase):
     def setUp(self):
         FakeSmtp.sent = []
-        import company.mailbox as mb
-        mb._LIMITER = None
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = TaskStore(Path(self.tmp.name) / "mailbox.db")
+
+    def tearDown(self):
+        self.tmp.cleanup()
 
     def run_inbox(self, messages, config=None, provider=None):
         imap = FakeImap(messages)
         notifier_mock = Mock()
         stats = process_inbox(config or cfg(), provider or DraftingProvider(),
                               imap_factory=lambda _c: imap, smtp_factory=lambda _c: FakeSmtp(),
-                              notifier=notifier_mock)
+                              notifier=notifier_mock, store=self.store)
         return stats, imap, notifier_mock
 
     def test_classification(self):
@@ -381,7 +386,7 @@ class MailboxTests(unittest.TestCase):
         self.assertFalse(links_allowed("see https://buymeacoffee.com.evil.io/x", ("https://buymeacoffee.com/sevketkaynar",)))
 
     def test_per_sender_cap_blocks_third_auto_reply(self):
-        mails = [make_mail() for _ in range(3)]
+        mails = [make_mail(message_id=f"<message-{i}@example.com>") for i in range(3)]
         stats, *_ = self.run_inbox(mails, cfg("auto_reply"))
         self.assertEqual(stats["replied"], 2)
         self.assertEqual(stats["escalated"], 1)
@@ -394,11 +399,12 @@ class MailboxTests(unittest.TestCase):
     def test_unconfigured_mailbox_is_a_noop(self):
         self.assertEqual(process_inbox(MailConfig())["status"], "not_configured")
 
-    def test_rate_limiter_daily_total(self):
-        limiter = RateLimiter(max_per_day=1, max_per_sender=5)
-        self.assertTrue(limiter.allow("a@x"))
-        limiter.record("a@x")
-        self.assertFalse(limiter.allow("b@x"))
+    def test_rate_limiter_daily_total_is_persistent(self):
+        cfg_value = MailConfig(max_per_day=1, max_per_sender_per_day=5)
+        limiter = PersistentRateLimiter(self.store, cfg_value)
+        self.assertTrue(limiter.reserve("a@x", "message-1"))
+        limiter.sent("message-1")
+        self.assertFalse(limiter.reserve("b@x", "message-2"))
 
 
 # ---------------------------------------------------------------- webhook
