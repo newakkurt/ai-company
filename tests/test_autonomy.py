@@ -272,7 +272,7 @@ class DraftingProvider:
 def cfg(mode="draft", **kw):
     return MailConfig(imap_host="imap.test", smtp_host="smtp.test", user="support@company.test",
                       password="pw", from_addr="support@company.test", mode=mode,
-                      allowed_link_prefixes=("https://buymeacoffee.com/sevketkaynar",), **kw)
+                      allowed_link_prefixes=("https://buymeacoffee.com/sevketkaynar",), knowledge="Owner-approved NetCmd facts: network operations product; owner confirms pricing and support.", **kw)
 
 
 class MailboxTests(unittest.TestCase):
@@ -308,6 +308,13 @@ class MailboxTests(unittest.TestCase):
         self.assertIn("gönderilmedi", notify.call_args.args[0])
         self.assertIn(b"\\Flagged".decode(), imap.flags[b"1"])
         self.assertTrue(imap.logged_out)
+
+    def test_auto_reply_is_blocked_without_owner_approved_knowledge(self):
+        stats, _imap, notify = self.run_inbox([make_mail()], cfg("auto_reply", knowledge=""))
+        self.assertEqual(stats["replied"], 0)
+        self.assertEqual(stats["escalated"], 1)
+        self.assertEqual(FakeSmtp.sent, [])
+        self.assertIn("sahip onaylı bilgi", notify.call_args.args[0])
 
     def test_auto_reply_sends_threaded_loop_safe_reply_with_disclosure(self):
         stats, imap, notify = self.run_inbox([make_mail()], cfg("auto_reply"))
