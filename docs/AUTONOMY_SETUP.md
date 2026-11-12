@@ -1,61 +1,89 @@
-# Otonom Çalışma Kurulumu
+# Otonom çalışma ve worker kurulumu
 
-Bu sürümle şirket kendi işini üretir, sonuçları ve satışları sana Telegram'dan bildirir, gelen maillere cevap hazırlar/verir. Hepsi **analiz + taslak** sınırında kalır; para, yayın, deploy, cihaz erişimi yoktur.
+Bu sistem görevleri otomatik üretir ve araştırma/analiz/ürün taslağı işlemlerini worker üzerinden yürütür. Ancak gerçek satış ve yayın için ödeme, onay, teslimat ve yasal kontrollerin tamamlanması gerekir.
 
-## Ne otomatik çalışır?
+## Scheduler davranışı
 
-| Parça | Ne yapar | Açma şartı |
-|---|---|---|
-| Scheduler (`company/scheduler.py`) | Her gün 06:00'dan sonra (TR saati) 4 görev, haftada 1 değerlendirme görevi üretir: TR potansiyel müşteri araştırması, yurtdışı potansiyel müşteri araştırması, ürün fırsatı taraması, içerik taslağı, haftalık gözden geçirme. Görev kimliği gün/hafta bazlıdır, tekrar üretmez. | Varsayılan açık. Kapatmak: `AI_COMPANY_AUTO_TASKS=false` |
-| Web araması | `research_intelligence`, `marketing_growth`, `product_business` Gemini'nin Google Search grounding özelliğiyle gerçek kaynak bulur; çıktıya kaynak URL + erişim tarihi eklenir. | `GEMINI_API_KEY` |
-| Otomatik retry | Başarısız görev 30 dk sonra en fazla 2 kez yeniden kuyruğa girer, kayıtlı ajan çıktıları tekrar üretilmez. | Otomatik |
-| Satış bildirimi | İmzalı BMC webhook'u doğrulanınca Telegram'a "Satış tamamlandı, bankanızı kontrol edin" gider. Beklenmeyen plan/fiyat/olay türü de "manuel kontrol" olarak bildirilir. İptaller de. | `BMC_*` + Telegram |
-| Günlük rapor | `auto-*` görevleri bitince CEO özeti Telegram'a gelir. Hata olursa da haber verir. | Telegram |
-| Mail | IMAP'ten okunmamış mailleri alır, taslak yazar. | Aşağıya bak |
-| Telegram intake | Web servisinin içinde çalışır; ağ kesintisinde kendini toparlar. | `AI_COMPANY_EMBEDDED_TELEGRAM=true` |
+- 14 uzman rol vardır; 14 ayrı sunucu/model instance'ı değildir.
+- Scheduler günde iki sınırlı iş akışı seçer: günlük odak + haftalık/ikinci iş akışı.
+- İş akışları dönüşümlüdür: müşteri araştırması, ürün fırsatı, ürün fabrikası, SEO, LinkedIn, YouTube, Instagram, Telegram, görsel brief, e-posta kampanyası taslağı, dönüşüm analizi ve haftalık büyüme raporu.
+- Haftalık ürün fabrikası tek bir küçük offline-first Python API starter ZIP üretir.
+- Görev kimlikleri tarih/hafta bazlıdır; tekrar seed edilmez.
+- Kota hatalarında 24 saat bekleme ve en fazla bir retry; diğer hatalarda sınırlı retry.
+- Ürün, müşteri ve gelir verisi yoksa ajanlar bunu açıkça belirtir; sayı uydurmaz.
 
-## Render ortam değişkenleri
+## Worker seçimi
 
-Mevcutlara ek olarak:
+Varsayılan tercih GitHub Actions scheduled worker'dır:
+- `.github/workflows/agent-worker.yml` her 5 dakikada bir çalışır.
+- Her çalışmada en fazla bir task işler.
+- Gerekli repository secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY` ve `GEMINI_API_KEY` veya `GROQ_API_KEY`.
+- Secrets yoksa workflow güvenli şekilde durur; değerleri loglamaz.
+
+Render embedded worker opsiyoneldir:
+- `AI_COMPANY_EMBEDDED_WORKER=true) yapılırsa Render web servisi worker başlatır.
+- GitHub Actions schedule aynı anda açıksa iki consumer farklı işleri paralel işleyebilir; ücretsiz model kotalarını zorlayabilir. Tek consumer tercih et.
+- Render Free uyur/yeniden başlar; kesintisiz 7/24 garantisi vermez.
+- Uzun LLM çağrılarında worker task heartbeat gönderir; 15 dakikalık stale lease yalnızca worker gerçekten durmuşsa devreye girmelidir.
+
+## Render temel değişkenleri
 
 ```text
-TELEGRAM_BOT_TOKEN=...            # BotFather
-TELEGRAM_ALLOWED_CHAT_IDS=...     # python -m company.cli telegram-id ile bul
-AI_COMPANY_EMBEDDED_TELEGRAM=true
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_DB_GATE_KEY=
+AI_COMPANY_API_KEY=
+GEMINI_API_KEY=   # veya GROQ_API_KEY
+AI_COMPANY_GEMINI_MODEL=gemini-3.5-flash-lite
 AI_COMPANY_AUTO_TASKS=true
+AI_COMPANY_EMBEDDED_WORKER=false
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_CHAT_IDS=
+TELEGRAM_OWNER_CHAT_ID=
+AI_COMPANY_EMBEDDED_TELEGRAM=false
 ```
 
-Mail için (ayrı bir destek posta kutusu aç; ana kutunu bağlama):
+## CRM ve müşteri bulma
 
-```text
-AI_COMPANY_EMBEDDED_MAIL=true
-MAIL_IMAP_HOST=imap.gmail.com
-MAIL_SMTP_HOST=smtp.gmail.com
-MAIL_USER=destek@...
-MAIL_PASSWORD=<uygulama şifresi>
-MAIL_KNOWLEDGE=Ürün: NetCmd ... (ajanın söyleyebileceği doğrulanmış bilgiler)
-AI_COMPANY_MAIL_MODE=draft        # önce draft ile birkaç gün izle
-```
+- Ajanlar şirket adaylarını yalnızca açık kaynaklardan araştırır.
+- Her kaynak URL'si public HTTPS, DNS/IP pinning, redirect kontrolü ve sınırlı içerik boyutu ile doğrulanır.
+- Sayfanın erişilebilir olması şirket kimliğini kanıtlamaz; kayıtlar `agent_research_unverified` olarak kalır.
+- Sahip CRM ekranında kaynağı ve şirketi kontrol edip "Verify source" yapmadan şirket `qualified` aşamasına geçemez.
+- Soğuk e-posta otomatik gönderilmez. Teklifler taslak olarak hazırlanır; iletişim için yasal dayanak ve insan onayı gerekir.
 
-## Mail güvenlik modeli
+## Mail güvenliği
 
-- Varsayılan mod `draft`: hiçbir şey gönderilmez, taslak Telegram'a düşer. Güvendikten sonra `AI_COMPANY_MAIL_MODE=auto_reply`.
-- Sadece **sana gelen** maile cevap verilir. Soğuk e-posta / toplu gönderim yoktur.
-- Para iadesi, itiraz, fatura, hukuk/KVKK/GDPR, sözleşme, güvenlik açığı bildirimi gibi konular **asla otomatik cevaplanmaz**, sana Telegram'dan iletilir.
-- `no-reply`, bülten, `Auto-Submitted`, `Precedence: bulk` gibi otomatik göndericilere cevap verilmez; kendi cevabımız `Auto-Submitted: auto-replied` taşır, mail döngüsü oluşmaz.
-- `MAIL_KNOWLEDGE` dışında bilgi/fiyat/söz verilmez; bilinmeyen için "sahibimiz dönüş yapacak" denir.
-- Taslakta izinli listesi dışında link varsa gönderilmez, sana iletilir.
-- Günlük toplam (20) ve gönderen başına (2) üst sınır. Sayaç süreç yeniden başlayınca sıfırlanır.
-- Cevap her zaman "otomatik yapay zekâ asistanı" imzası taşır.
+- Varsayılan `AI_COMPANY_MAIL_MODE=draft): hiçbir mail gönderilmez.
+- `auto_reply) yalnızca gelen destek maillerine yöneliktir; prospect outreach değildir.
+- Auto-reply için ilk `Authentication-Results` header'ı `MAIL_TRUSTED_AUTH_SERVERS` listesindeki sunucudan gelmeli, DMARC pass ve SPF veya DKIM pass göstermelidir.
+- Gönderim sayacı Supabase/SQLite'ta kalıcıdır; aynı Message-ID ikinci kez gönderilmez.
+- Günlük toplam 20, aynı gönderenden günlük 2 cevap sınırı varsayılandır.
+- SMTP belirsiz/başarısız olursa otomatik tekrar yapılmaz; sahibine bildirilir.
+- Ayrı destek mailbox'ı ve Gmail App Password kullan; ana kişisel mailbox'ı bağlama.
 
-## Doğrulama
+## Ürün fabrikası ve satış
 
-`GET /readyz` artık `services` bloğunu da döner (scheduler, notifier, mail, telegram). Canlıda bir test satışı veya BMC test olayı dışında satış bildirimini uçtan uca doğrulayamazsın; BMC'nin "test event"leri (`live_mode=false`) bilerek yok sayılır.
+1. Haftalık factory bir ZIP üretir; Supabase'e checksum ile kaydeder, durum `review_required`.
+2. Sahip ürünü inceler ve `publish_product) için product_id + SHA-256 kapsamlı onay verir.
+3. Onay sonrası `POST /api/factory/products/{product_id}/publish) ürünü satışa hazır yapar.
+4. BMC Shop item ID (`extras[].id`), ürün ID ve fiyat `BMC_EXTRA_PRODUCT_MAP ile eşleştirilir.
+5. İmzalı live webhook ödeme ledger'ına yazılır ve entitlement oluşturur.
+6. Ürün yayınlanmış ve SMTP hazırsa alıcıya 7 gün / 5 indirme limitli link gönderilir. SMTP yoksa sahibine manuel teslimat linki gönderilir.
+7. Ürün henüz yayınlanmamışsa entitlement pending kalır; yayın sonrası `POST /api/payments/entitlements/{subscription_id}/deliver) çağrılır.
+8. Refund/cancel/pause entitlement erişimini kapatır.
 
-## Bilinen sınırlar (dürüst durum)
+## Canlı doğrulama
 
-- Render Free uyur/yeniden başlar; "7/24" garantisi yoktur (bkz. `continuous-agent-worker-setup.md`).
-- Potansiyel müşteri listesi şu an ajan çıktısı metnidir; yapılandırılmış CRM/dedupe tablosu yoktur.
-- Soğuk e-posta gönderimi, sosyal medya yayını, kod yazıp PR açma, ürün inşası henüz **yoktur**; ajanlar bunlar için plan/taslak üretir.
-- Gelir raporu için ödeme kayıtlarını listeleyen bir araç yoktur; CFO ajanı veri verilmedikçe rakam üretmez.
-- Webhook bildirimi "satış gerçekleşti" der; paranın bankaya geçtiğini doğrulamak sende kalır.
+`/readyz` worker, model ve database durumunu gösterir. Gerçek operasyon için ayrıca:
+- GitHub Actions son run başarılı olmalı.
+- CRM kaynakları kontrol edilmiş olmalı.
+- En az bir ürün release QA'dan geçip onaylanmalı.
+- BMC test event'inin satış yaratmadığı, kontrollü live event'in bir ledger kaydı ve tek entitlement oluşturduğu doğrulanmalı.
+- Gerçek payout ve banka dekontu ayrı ayrı mutabık olmalı.
+
+## Bilinen sınırlar
+
+- Render Free ve ücretsiz model kotası 7/24 kesintisiz çalışmayı garanti etmez.
+- Ajanlar dışarıya soğuk satış e-postası atmaz, sosyal medyada otomatik yayın yapmaz ve kullanıcı onayı olmadan ürün yayınlamaz.
+- Üretilen ZIP'ler için ağsız runtime sandbox QA henüz tamamlanmalıdır.
+- Webhook sale event'i bankaya para geçtiğinin kanıtı değildir.

@@ -10,3 +10,4 @@ actions:
   spend_or_enable_paid_service: {approval: true}
   change_network_device: {approval: true}
   delete_user_data: {approval: true}
+  publish_product: {approval: true}

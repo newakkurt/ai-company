@@ -1,0 +1,1 @@
+alter function public.consume_product_download(text) security invoker;

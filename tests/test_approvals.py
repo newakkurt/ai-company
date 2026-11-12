@@ -23,6 +23,7 @@ class ApprovalEngineTests(unittest.TestCase):
         self.assertFalse(action_requires_approval("read_public_docs"))
         self.assertTrue(action_requires_approval("deploy_production"))
         self.assertTrue(action_requires_approval("publish_social_post"))
+        self.assertTrue(action_requires_approval("publish_product"))
 
     def test_protected_action_requires_matching_approval(self):
         with self.assertRaises(ApprovalRequiredError):

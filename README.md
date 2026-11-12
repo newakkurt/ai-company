@@ -1,156 +1,104 @@
 # New Akkurt AI Company
 
-Bağımsız, modüler, 14 rol ajanlı ve insan-onaylı AI şirketi orkestrasyon çatısı.
+14 uzman rolü kullanan, Supabase tabanlı görev kuyruğu ve insan onay kapılarıyla çalışan AI operasyon sistemi.
 
-## Neler var?
-- 14 uzman rol: CEO, proje yönetimi, teknoloji mimarisi, yazılım, network/altyapı, araştırma, pazarlama, içerik, ürün/iş, veri, hafıza, QA, güvenlik ve CFO/finans operasyonları.
-- SQLite görev, ajan ataması, analiz çıktısı ve denetim kaydı.
-- Yerel bilgi hafızası: `remember` / `recall`.
-- Şeffaf anahtar-kelime yönlendirmesi ve isteğe bağlı yerel Ollama modeli.
-- İsteğe bağlı, izin listeli Telegram görev alımı.
-- Otonom günlük/haftalık görev üretici, web araştırması (kaynaklı), satış ve rapor bildirimleri (Telegram), gelen mail için taslak/cevap altyapısı. Kurulum: [docs/AUTONOMY_SETUP.md](docs/AUTONOMY_SETUP.md)
+**Önemli durum notu:** Bu depo, araştırma/CRM/ürün üretimi/satış teslimatı altyapısını içerir; ancak "kendi kendine müşteri bulup ürün satıp gelir üreten şirket" olarak kabul edilmesi için canlı secrets, Render ayarları, BMC ürün eşlemesi, SMTP teslimatı ve gerçek uçtan uca testlerin tamamlanması gerekir. Üretilen ürünler varsayılan olarak `review_required` durumundadır; sahibin onayı olmadan yayınlanmaz.
 
-**Önemli:** 14 rol tanımlı ve yerel modelle analiz yapabilecek altyapı hazırdır. Model bağlı değilken ajanlar arka planda bağımsız çalışan servisler değildir. Görev yönlendirme deterministiktir; LLM çıktıları öneridir, doğrulanmış gerçek değildir.
+## Özellikler
 
-## Ücretsiz / yerel öncelikli
-Python + SQLite + isteğe bağlı Ollama. Bulut LLM API anahtarı zorunlu değildir. Yerel modelin çalışması için Ollama ve seçilen modelin bilgisayara kurulması gerekir.
+- 14 uzman rol; Gemini birincil, Groq isteğe bağlı kota yedeği.
+- Supabase PostgreSQL + RLS + sunucu tarafı API gate; yerel geliştirme için SQLite.
+- İdempotent günlük/haftalık iş üretimi: günde iki sınırlı iş akışı, haftalık iş akışları dönüşümlü.
+- Tek seferde bir görevi işleyen worker; uzun LLM işlemleri sırasında heartbeat ile lease yenileme.
+- Kaynak URL'leri SSRF korumalı HTTPS denetiminden geçen CRM adayları; satış aşamasından önce insan doğrulaması.
+- Draft-first e-posta; auto-reply yalnızca güvenilir SPF/DKIM/DMARC sonucu ve kalıcı gönderim limitleriyle.
+- Ürün fabrikası: versioned ZIP + SHA-256 + kalıcı saklama.
+- Ürün yayını için dosya checksum'una bağlı tek kullanımlık insan onayı.
+- BMC webhook, ödeme ledger'ı, ürün entitlement'ı ve süre/indirme limitli güvenli teslimat bağlantısı.
+- Telegram bildirimleri, sağlık kontrolü ve görev raporları.
 
-## Güvenlik
-- Varsayılan mod `dry_run`.
-- Ajanlar shell komutu çalıştırmaz, cihazlara bağlanmaz, kodu otomatik değiştirmez.
-- Yayın, deploy, harcama, veri silme, Git yazma/PR ve network cihaz değişiklikleri ayrı, kapsamı açık insan onayı ister.
-- Onay kaydı kendi başına işlem yürütmez.
-- Telegram yalnızca `TELEGRAM_ALLOWED_CHAT_IDS` listesindeki sohbetlerden görev alır.
-- Gizli anahtarlar repoya veya loglara yazılmaz.
-- Mevcut projeler ayrı depolarda kalır; kodları bu repoya kopyalanmaz.
+## Yerel kurulum
 
-## Windows kurulumu (PowerShell)
-Python 3.10+ ve Git gerekir.
+Python 3.10+:
 
 ```powershell
 git clone https://github.com/newakkurt/ai-company.git
 cd ai-company
-git checkout main
-
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -e .
-python -m company.cli doctor
-python -m company.cli agents
-```
-
-PowerShell sanal ortam aktivasyonunu engellerse yalnızca açık terminal oturumunda:
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-```
-
-## İlk komutlar
-```powershell
-python -m company.cli agents
-python -m company.cli plan "Huawei switch SNMP network audit"
-python -m company.cli plan --all-agents "Şirket genel strateji ve proje denetimi"
-python -m company.cli list
-python -m company.cli remember "Network lab" "Huawei SNMP test notları" --tags "network,huawei,snmp"
-python -m company.cli recall "Huawei SNMP"
-```
-
-`plan` görev oluşturur ve uzman rol önerileri kaydeder; henüz model analizi yapmaz.
-
-## Yerel AI modeli (isteğe bağlı)
-1. Windows'a Ollama kur ve çalıştır.
-2. PowerShell'de bir model indir: `ollama pull qwen2.5:7b`.
-3. İsteğe bağlı ayarları proje kökündeki `.env` dosyasında tanımla; CLI bu dosyayı otomatik yükler (mevcut Windows ortam değişkenlerini ezmez):
-```powershell
-$env:AI_COMPANY_OLLAMA_URL = "http://127.0.0.1:11434"
-$env:AI_COMPANY_OLLAMA_MODEL = "qwen2.5:7b"
-``
-4. Önce `plan` ile görev oluştur, ekrana yazılan task ID'yi kullan:
-```powershell
-python -m company.cli run task-XXXXXXXXXX
-``
-Bu komut CEO ve yönlendirilen uzman roller için yerel modelden analiz alır ve SQLite'a kaydeder. Analiz dışında hiçbir işlem yapmaz. Model bilgisayarın RAM/VRAM kapasitesine göre seçilmelidir.
-
-## Telegram görev alımı
-1. BotFather üzerinden ayrı bir AI Company botu oluştur.
-2. Token'ı yerel `.env` dosyasına koy; GitHub'a veya sohbete gönderme.
-3. `TELEGRAM_BOT_TOKEN` değerini ortam değişkeni olarak yükle ve botuna `/start` gönder.
-4. `python -m company.cli telegram-id` ile bekleyen mesajlardan chat ID'ni al. Bu komut mesaj metnini göstermez.
-5. Chat ID'ni `TELEGRAM_ALLOWED_CHAT_IDS` değişkenine ekle.
-6. `python -m company.cli telegram-poll` komutunu çalıştır.
-7. Telegram'da `/task Görev açıklaması` gönder.
-
-Bot polling çalışırken makine ve internet bağlantısı açık kalmalıdır. Telegram botu görevleri yalnızca SQLite'a kaydeder.
-
-## Testler
-```powershell
+pip install -r requirements.txt
+Copy-Item .env.example .env
 python -m unittest discover -s tests -v
 ```
-GitHub Actions ayrıca Python 3.10, 3.11 ve 3.12 üzerinde testleri çalıştırır.
 
-## Bulut paneli (Render)
+Gerçek anahtarları `.env` içine veya Render Environment / GitHub Actions Secrets'a koy; Git'e commit etme.
 
-Bu sürüm FastAPI tabanlı bir panel ve korumalı görev API'si içerir:
-- Render başlangıç komutu: `uvicorn app:app --host 0.0.0.0 --port $PORT`
-- Sağlık kontrolü: `/healthz`
-- Panel: ana sayfa
-- API: `/api/agents`, `/api/tasks`, `/api/tasks/{id}/run`
-- Sunucuda `AI_COMPANY_API_KEY` tanımlanmadan yönetim API'si kapalıdır.
-- Bulut modeli için Render ortam değişkenlerine `GEMINI_API_KEY` eklenmelidir. Anahtarı GitHub'a veya sohbet mesajına koyma.
-- İsteğe bağlı model adı: `AI_COMPANY_GEMINI_MODEL=gemini-2.5-flash`.
-- 14 rol bir göreve atanabilir; `run` analiz üretir, dış işlem yapmaz.
+## Hosted kurulum
 
-**Kalıcı veri:** Render üzerinde `SUPABASE_URL`, `SUPABASE_ANON_KEY` ve yalnızca sunucuda tutulan `SUPABASE_DB_GATE_KEY` tanımlıysa görevler ayrı Supabase PostgreSQL veritabanına yazılır. Bu projede RLS açık, özel anahtar kontrolü sunucu tarafında yapılır. Yerel geliştirmede SQLite geri dönüşü korunur.
+### Render environment
 
-**Render ortam değişkenleri**
-- `AI_COMPANY_API_KEY`: Panel/API erişim anahtarı.
-- `SUPABASE_URL`: AI Company'ye özel Supabase proje URL'si.
-- `SUPABASE_ANON_KEY`: Bu projeye ait public anon key.
-- `SUPABASE_DB_GATE_KEY`: Veritabanı pre-request doğrulaması için gizli sunucu anahtarı; istemciye veya Git'e koyma.
-- `GEMINI_API_KEY`: Bulut analizleri için Gemini anahtarı. Bu değişken eklenmeden ajan analizi başlatılamaz.
-- `AI_COMPANY_GEMINI_MODEL`: İsteğe bağlı model seçimi (varsayılan `gemini-2.5-flash`).
+Gerekli temel değişkenler:
 
-NetCmd projesi/veritabanı kullanılmaz. Supabase Free projeleri 500 MB veritabanı kotası ve düşük aktivitede otomatik duraklatma sınırlamalarına tabidir.
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_DB_GATE_KEY` (yalnızca sunucu tarafında)
+- `AI_COMPANY_API_KEY`
+- `GEMINI_API_KEY` veya `GROQ_API_KEY`
 
-## Dokümantasyon
-- [Pazarlama ve büyüme merkezi](docs/MARKETING_GROWTH.md) — `/marketing` paneli, günlük/haftalık içerik playbook'ları ve onaylı yayın akışı.
-- [NetCmd PRO satış, Buy Me a Coffee webhook ve banka mutabakatı](docs/SALES_AND_BILLING.md)
-- [14 ajan işletim modeli](docs/AGENTS.md)
-- [Mimari](docs/ARCHITECTURE.md)
-- [Güvenlik](docs/SECURITY.md)
-- [Yol haritası](docs/ROADMAP.md)
-- [Sahip delegasyonu ve otonom çalışma modeli](docs/OWNER_DELEGATION_AND_AUTONOMY.md)
+İsteğe bağlı hizmetler için Telegram, mail ve BMC değişkenlerini `.env.example` içinden yapılandır.
 
+### GitHub Actions Secrets
 
-## Dijital ürün fabrikası
+`agent-worker.yml` için:
 
-Yönetim API'si üzerinden ürün fabrikası uçları:
-- `GET /api/factory/status`: pipeline ve güvenlik sınırları.
-- `POST /api/factory/research`: 14 rol içinden araştırma, ürün, pazarlama, mimari, network, güvenlik ve QA rollerine kanıtlı pazar araştırması görevi açar.
-- `POST /api/factory/score`: 7 ölçütlü, ağırlıkları açık 0-100 fırsat puanı ve güvenlik riski cezası.
-- `POST /api/factory/build`: Python API, web uygulaması veya Python CLI MVP kaynakları, README, örnek veri, test planı, QA/güvenlik raporu ve sürümlü ZIP üretir.
-- `GET /api/factory/products/{product_id}`: sürüm manifesti ve kalite özeti.
-- `GET /api/factory/products/{product_id}/download`: ZIP teslimi.
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_DB_GATE_KEY`
+- `GEMINI_API_KEY` veya `GROQ_API_KEY`
 
-Tüm uçlar `Authorization: Bearer <AI_COMPANY_API_KEY>` gerektirir. Örnek:
-```json
-{"name":"NetOps Mini Audit","description":"Küçük MSP ekipleri için çok üreticili switch envanteri ve salt-okunur konfigürasyon denetimi MVP'si","product_type":"python_api","version":"0.1.0"}
+Worker her 5 dakikada bir en fazla bir görevi işler. Varsayılan tercih budur. Aynı anda iki consumer çalıştırmamak için GitHub Actions schedule açıkken `AI_COMPANY_EMBEDDED_WORKER=false) bırak.
+
+### Worker ve kota
+
+- Scheduler günde iki bounded task seçer; 14 ajanın tamamını her göreve göndermeye çalışmaz.
+- Quota hataları 24 saat bekletilir ve en fazla bir kez yeniden denenir.
+- Task heartbeat, uzun model çağrılarında 15 dakikalık stale-lease requeue riskini azaltır.
+- Render Free uyku/yeniden başlama davranışı nedeniyle 7/24 kesintisiz çalışma garantisi yoktur.
+
+## Ürün yayınlama ve teslimat
+
+Ayrıntılar: [Product publishing and delivery](docs/PRODUCT_PUBLISHING_AND_DELIVERY.md).
+
+1. Ürün fabrikası ZIP üretir ve Supabase'e kaydeder; durum `review_required`.
+2. Sahip, `product_id` + `sha256` kapsamıyla `publish_product` onayı oluşturur.
+3. Onay sonrası `POST /api/factory/products/{product_id}/publish` çağrılır.
+4. BMC level ID, yayınlanmış `product_id` ve fiyat ile `BMC_PRODUCT_LEVEL_MAP` içine eşlenir.
+5. İmzalı canlı ödeme webhook'u entitlement oluşturur; SMTP hazırsa alıcıya 7 gün / 5 indirme limitli link gönderilir.
+6. Ürün ödeme anında henüz yayınlanmamışsa entitlement pending kalır; yayın sonrası `POST /api/payments/entitlements/{subscription_id}/deliver` ile teslimat tamamlanır.
+7. İade/iptal/duraklatma entitlement erişimini kapatır.
+
+## Güvenlik sınırları
+
+- Ajanlar shell, ağ cihazı veya müşteri kimlik bilgilerine erişmez.
+- Soğuk satış e-postası otomatik gönderilmez; müşteri iletişimi draft/insan onayı sınırındadır.
+- Ürün yayınlama, deployment, para harcama, iade ve diğer kritik dış işlemler açık onay gerektirir.
+- Erişilebilir kaynak sayfası tek başına şirketin gerçekliğini kanıtlamaz; CRM'de insan doğrulaması gerekir.
+- Ödeme webhook'u satış/üyelik olayıdır; banka mutabakatı veya fatura yerine geçmez.
+
+## Testler
+
+```bash
+python -m unittest discover -s tests -v
 ```
 
-**Güvenlik ve teslimat notları:** Üretilen kaynak kod hiçbir zaman worker içinde çalıştırılmaz. Dosya yolu/uzantısı/boyutu ve gömülü sırlar doğrulanır; Python sözdizimi AST ile kontrol edilir; riskli kalıplar uyarı üretir. Bunlar tam runtime testi veya güvenlik sertifikası değildir. Her sürüm için SHA-256 ve yerel yedek ZIP oluşturulur. Render Free dosya sistemi geçicidir; ZIP'i kalıcı müşteri teslimi olarak kullanmadan önce kalıcı object storage/harici release deposu bağlanmalıdır. Ürünler varsayılan olarak `review_required` durumundadır.
+GitHub Actions, Python 3.10 / 3.11 / 3.12 üzerinde testleri çalıştırır.
 
+## Belgeler
 
-## Müşteri bulma ve CRM
-
-CRM ekranı: `/crm` (API anahtarı gerekir). Özellikler:
-- Türkiye ve global prospect araştırması için ajan görevi oluşturma; günlük prospect playbook çıktıları JSON bloklarından CRM'e alınır.
-- Şirketleri ülke + normalize şirket adı ile tekilleştirme; kamuya açık kaynak URL'si, kaynak adı, sektör, ihtiyaç ve uyum gerekçesi kaydı.
-- 0–100 açıklanabilir müşteri uygunluk puanı; şirket/kişi kaynak kayıtları.
-- Kişi kaydı, satış aşamaları, teklif taslağı ve takip tarihi.
-- Gelen kutusu mesaj sınıflandırma kaydı; hassas konular insan incelemesine ayrılır.
-- Merkezi unsubscribe/do-not-contact listesi; gelen ret isteği gelecekteki iletişimi engeller.
-- E-posta cevapları yalnızca `MAIL_KNOWLEDGE` içindeki sahip-onaylı bilgilerle hazırlanır. Bilgi tabanı boşsa otomatik yanıt gönderimi engellenir.
-- CRM prospect teklifleri yalnızca taslak olarak oluşturulur. Soğuk e-posta gönderimi kapalıdır; insan onayı ve geçerli iletişim izni/hukuki dayanak olmadan gönderim yapılmaz.
-
-CRM tabloları Supabase'te RLS + mevcut özel `app.ai_company_authorized` gate ile korunur. Kişisel veri yerine mümkün olduğunca şirketin yayımladığı genel iletişim kanalları kullanılmalıdır. Türkiye'de ticari elektronik ileti ve İYS yükümlülükleri, GDPR/KVKK ve veri saklama süreleri şirket tarafından doğrulanmalıdır. Sistem hukuki dayanak veya rıza varlığını kendiliğinden varsaymaz.
+- [Architecture](docs/ARCHITECTURE.md)
+- [Roadmap and remaining production gates](docs/ROADMAP.md)
+- [Autonomy setup](docs/AUTONOMY_SETUP.md)
+- [Sales and billing](docs/SALES_AND_BILLING.md)
+- [Product publishing and delivery](docs/PRODUCT_PUBLISHING_AND_DELIVERY.md)
+- [Security](docs/SECURITY.md)
