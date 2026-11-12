@@ -37,7 +37,14 @@ class LeadIngestTests(unittest.TestCase):
         store = FakeStore(task_id)
         with patch("company.worker.run_task", return_value=_output(leads_json)), \
                 patch("company.worker.crm_upsert_company") as upsert, \
-                patch("company.worker._safe_notify"):
+                patch("company.worker._safe_notify"), \
+                patch("company.worker.verify_public_source", return_value={
+                    "source_validation_status": "reachable_match",
+                    "source_http_status": 200,
+                    "source_page_title": "Acme Network",
+                    "source_checked_at": "2026-11-12T14:00:00+00:00",
+                    "source_validation_note": "HTTP 200; company-name token found in page text.",
+                }):
             result = process_one_task(store=store, provider=object())
         return store, result, upsert
 
