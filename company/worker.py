@@ -7,6 +7,8 @@ import threading
 import time
 
 from .agent_runner import run_task
+from .llm import get_provider
+from .product_factory import build_product
 from .notifier import notify_task_failed, notify_task_result
 from .scheduler import seed_due_tasks
 from .store import TaskStore
@@ -72,6 +74,28 @@ def process_one_task(store=None, provider=None):
     print(f"agent_worker: claimed task {task_id}", flush=True)
     try:
         results = run_task(task_id, store=store, provider=provider)
+        if task_id.startswith("auto-digital-product-factory-"):
+            research_context = "\\n\\n".join(
+                f"[{item['agent_id']}]\\n{item['output']}" for item in results
+            )
+            release = build_product(
+                "Network Ops Starter",
+                "Create the smallest useful offline-first network operations product "
+                "for MSPs and IT teams. Use this week's specialist market/problem analysis "
+                "to choose the most valuable narrow feature. Parse user-supplied sample/config "
+                "text only; do not connect to devices, use credentials, or change infrastructure. "
+                "Research and buyer context:\\n" + research_context[:12000],
+                product_type="python_api",
+                version="0.1.0",
+                provider=provider or get_provider(),
+            )
+            import json
+            store.record_agent_output(
+                task_id, "product_factory",
+                "Generated release metadata (source not executed):\\n"
+                + json.dumps(release, ensure_ascii=False, indent=2),
+            )
+            results.append({"agent_id": "product_factory", "output": json.dumps(release, ensure_ascii=False)})
         store.complete_task(task_id, output_count=len(results))
         print(
             f"agent_worker: completed task {task_id}; "
