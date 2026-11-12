@@ -349,6 +349,46 @@ async def buymeacoffee_webhook(request: Request,
         return {"ok": True, "duplicate": True}
 
     supported = {"membership.started", "membership.updated", "membership.cancelled", "membership.paused"}
+    if event_type.endswith(".refunded"):
+        try:
+            refund_amount = Decimal(str(data.get("amount", "0")))
+            refund_currency = str(data.get("currency", "")).upper()
+            if refund_amount <= 0 or not refund_currency:
+                raise ValueError("missing refund amount/currency")
+            refund_subscription = str(data.get("subscription_id") or data.get("psp_id") or "").strip() or None
+            if hasattr(store, "_request"):
+                inserted = store._request("payment_ledger", "POST", {"on_conflict":"event_id"}, {
+                    "event_id":event_key,"event_type":event_type,"subscription_id":refund_subscription,
+                    "product_code":"netcmd_pro","gross_amount":str(-refund_amount),
+                    "currency":refund_currency,"platform_fee_amount":"0",
+                    "processing_fee_estimate":"0","net_estimate":str(-refund_amount),
+                    "entry_status":"refund_reported","provider_created_at":_iso_timestamp(event.get("created")),
+                    "raw_event":event
+                }, "resolution=ignore-duplicates,return=representation")
+                first_refund_record = bool(inserted)
+            else:
+                with store._connect() as db:
+                    db.execute("""CREATE TABLE IF NOT EXISTS payment_ledger (
+                        event_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,subscription_id TEXT,
+                        product_code TEXT NOT NULL,gross_amount REAL NOT NULL,currency TEXT NOT NULL,
+                        platform_fee_amount REAL NOT NULL,processing_fee_estimate REAL NOT NULL,
+                        net_estimate REAL NOT NULL,entry_status TEXT NOT NULL,provider_created_at TEXT,
+                        received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,raw_event TEXT NOT NULL)""")
+                    cur=db.execute("""INSERT OR IGNORE INTO payment_ledger
+                        (event_id,event_type,subscription_id,product_code,gross_amount,currency,
+                         platform_fee_amount,processing_fee_estimate,net_estimate,entry_status,
+                         provider_created_at,raw_event) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (event_key,event_type,refund_subscription,"netcmd_pro",float(-refund_amount),
+                         refund_currency,0,0,float(-refund_amount),"refund_reported",
+                         _iso_timestamp(event.get("created")),json.dumps(event)))
+                    first_refund_record=cur.rowcount==1
+            store.record_payment_event(event_key,event_type,refund_subscription)
+            if first_refund_record:
+                await asyncio.to_thread(notify_unexpected_payment,event_type,
+                    "İade olayı kaydedildi; BMC panelindeki gerçek iade tutarı ve bakiyeyle mutabakat yapın",data)
+            return {"ok":True,"refund_recorded":first_refund_record}
+        except (ValueError, InvalidOperation):
+            raise HTTPException(status_code=400,detail="Invalid refund amount or currency.")
     if event_type not in supported:
         store.record_payment_event(event_key, event_type, None)
         await asyncio.to_thread(notify_unexpected_payment, event_type, "desteklenmeyen olay türü", data)
