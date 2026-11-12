@@ -350,6 +350,75 @@ class SupabaseTaskStore:
         }, {"status": status, "sent_at": utc_now() if status == "sent" else None,
             "error_type": error_type}, "return=minimal")
 
+
+    def update_product_release_status(self, product_id: str, status: str):
+        if status not in ("review_required", "approved_for_sale", "withdrawn"):
+            raise ValueError("Invalid product release status")
+        rows = self._request("product_releases", "PATCH", {
+            "product_id": f"eq.{product_id}",
+        }, {"release_status": status}, "return=representation")
+        return rows[0] if rows else None
+
+    def create_product_entitlement(self, event_id: str, subscription_id: str,
+                                   product_id: str, buyer_email: str | None,
+                                   buyer_name: str | None):
+        item = {
+            "entitlement_id": f"ent-{uuid.uuid4().hex}",
+            "event_id": event_id, "subscription_id": subscription_id,
+            "product_id": product_id, "buyer_email": buyer_email,
+            "buyer_name": buyer_name, "status": "active",
+            "delivery_status": "pending", "created_at": utc_now(),
+            "updated_at": utc_now(),
+        }
+        inserted = self._request("product_entitlements", "POST", {
+            "on_conflict": "subscription_id",
+        }, item, "resolution=ignore-duplicates,return=representation")
+        if inserted:
+            return {"created": True, "entitlement": inserted[0]}
+        existing = self._request("product_entitlements", params={
+            "select": "*", "subscription_id": f"eq.{subscription_id}", "limit": "1",
+        })
+        return {"created": False, "entitlement": existing[0] if existing else None}
+
+    def get_product_entitlement(self, entitlement_id: str):
+        rows = self._request("product_entitlements", params={
+            "select": "*", "entitlement_id": f"eq.{entitlement_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
+    def update_product_entitlement_status(self, subscription_id: str, status: str):
+        if status not in ("active", "paused", "cancelled", "refunded", "revoked"):
+            raise ValueError("Invalid entitlement status")
+        return self._request("product_entitlements", "PATCH", {
+            "subscription_id": f"eq.{subscription_id}",
+        }, {"status": status, "updated_at": utc_now()}, "return=minimal")
+
+    def update_product_entitlement_delivery(self, entitlement_id: str, status: str):
+        if status not in ("pending", "sent", "manual_required", "failed"):
+            raise ValueError("Invalid delivery status")
+        return self._request("product_entitlements", "PATCH", {
+            "entitlement_id": f"eq.{entitlement_id}",
+        }, {"delivery_status": status,
+            "delivered_at": utc_now() if status == "sent" else None,
+            "updated_at": utc_now()}, "return=minimal")
+
+    def create_product_download_token(self, entitlement_id: str, token_hash: str,
+                                      expires_at: str, max_downloads: int = 5):
+        rows = self._request("product_download_tokens", "POST", {
+            "on_conflict": "entitlement_id",
+        }, {"token_hash": token_hash, "entitlement_id": entitlement_id,
+            "expires_at": expires_at, "max_downloads": max_downloads,
+            "download_count": 0, "status": "active", "created_at": utc_now()},
+            "resolution=ignore-duplicates,return=representation")
+        return bool(rows)
+
+    def consume_product_download(self, token_hash: str):
+        result = self._request("rpc/consume_product_download", "POST",
+                               body={"p_token_hash": token_hash})
+        if isinstance(result, list):
+            return result[0] if result else None
+        return result if isinstance(result, dict) and result else None
+
     def save_product_release(self, release: dict, artifact: bytes):
         if not isinstance(artifact, bytes) or not artifact or len(artifact) > MAX_PRODUCT_ARTIFACT_BYTES:
             raise ValueError("Product artifact is empty or exceeds the 1.5 MB storage limit")
@@ -527,6 +596,25 @@ class TaskStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_product_releases_created
                     ON product_releases(created_at);
+
+                CREATE TABLE IF NOT EXISTS product_entitlements (
+                    entitlement_id TEXT PRIMARY KEY, event_id TEXT NOT NULL UNIQUE,
+                    subscription_id TEXT NOT NULL UNIQUE, product_id TEXT NOT NULL,
+                    buyer_email TEXT, buyer_name TEXT, status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active','paused','cancelled','refunded','revoked')),
+                    delivery_status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(delivery_status IN ('pending','sent','manual_required','failed')),
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, delivered_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_product_entitlements_buyer
+                    ON product_entitlements(buyer_email, created_at);
+                CREATE TABLE IF NOT EXISTS product_download_tokens (
+                    token_hash TEXT PRIMARY KEY, entitlement_id TEXT NOT NULL UNIQUE,
+                    expires_at TEXT NOT NULL, max_downloads INTEGER NOT NULL DEFAULT 5,
+                    download_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active','revoked')),
+                    created_at TEXT NOT NULL, last_downloaded_at TEXT
+                );
                 CREATE TABLE IF NOT EXISTS approval_requests (
                     approval_id TEXT PRIMARY KEY, action TEXT NOT NULL, scope_json TEXT NOT NULL,
                     requested_by TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending'
@@ -885,6 +973,92 @@ class TaskStore:
                 (status, utc_now() if status == "sent" else None, error_type, message_id),
             )
         return True
+
+
+    def update_product_release_status(self, product_id: str, status: str):
+        if status not in ("review_required", "approved_for_sale", "withdrawn"):
+            raise ValueError("Invalid product release status")
+        with self._connect() as db:
+            db.execute("UPDATE product_releases SET release_status=? WHERE product_id=?",
+                       (status, product_id))
+        return self.get_product_release(product_id)
+
+    def create_product_entitlement(self, event_id: str, subscription_id: str,
+                                   product_id: str, buyer_email: str | None,
+                                   buyer_name: str | None):
+        entitlement_id = f"ent-{uuid.uuid4().hex}"
+        now = utc_now()
+        with self._connect() as db:
+            cur = db.execute(
+                """INSERT OR IGNORE INTO product_entitlements
+                   (entitlement_id,event_id,subscription_id,product_id,buyer_email,buyer_name,
+                    status,delivery_status,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,'active','pending',?,?)""",
+                (entitlement_id,event_id,subscription_id,product_id,buyer_email,buyer_name,now,now),
+            )
+        if cur.rowcount:
+            return {"created": True, "entitlement": self.get_product_entitlement(entitlement_id)}
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM product_entitlements WHERE subscription_id=?",
+                             (subscription_id,)).fetchone()
+        return {"created": False, "entitlement": dict(row) if row else None}
+
+    def get_product_entitlement(self, entitlement_id: str):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM product_entitlements WHERE entitlement_id=?",
+                             (entitlement_id,)).fetchone()
+        return dict(row) if row else None
+
+    def update_product_entitlement_status(self, subscription_id: str, status: str):
+        if status not in ("active", "paused", "cancelled", "refunded", "revoked"):
+            raise ValueError("Invalid entitlement status")
+        with self._connect() as db:
+            db.execute("UPDATE product_entitlements SET status=?,updated_at=? WHERE subscription_id=?",
+                       (status, utc_now(), subscription_id))
+        return True
+
+    def update_product_entitlement_delivery(self, entitlement_id: str, status: str):
+        if status not in ("pending", "sent", "manual_required", "failed"):
+            raise ValueError("Invalid delivery status")
+        with self._connect() as db:
+            db.execute("UPDATE product_entitlements SET delivery_status=?,delivered_at=?,updated_at=? WHERE entitlement_id=?",
+                       (status, utc_now() if status == "sent" else None, utc_now(), entitlement_id))
+        return True
+
+    def create_product_download_token(self, entitlement_id: str, token_hash: str,
+                                      expires_at: str, max_downloads: int = 5):
+        with self._connect() as db:
+            cur = db.execute(
+                """INSERT OR IGNORE INTO product_download_tokens
+                   (token_hash,entitlement_id,expires_at,max_downloads,download_count,status,created_at)
+                   VALUES (?,?,?, ?,0,'active',?)""",
+                (token_hash,entitlement_id,expires_at,max_downloads,utc_now()),
+            )
+        return cur.rowcount == 1
+
+    def consume_product_download(self, token_hash: str):
+        now = datetime.now(timezone.utc)
+        with self._connect() as db:
+            token = db.execute("SELECT * FROM product_download_tokens WHERE token_hash=?",
+                               (token_hash,)).fetchone()
+            if token is None or token["status"] != "active" or token["download_count"] >= token["max_downloads"]:
+                return None
+            expires = datetime.fromisoformat(token["expires_at"].replace("Z", "+00:00"))
+            if expires <= now:
+                return None
+            entitlement = db.execute("SELECT * FROM product_entitlements WHERE entitlement_id=?",
+                                     (token["entitlement_id"],)).fetchone()
+            if entitlement is None or entitlement["status"] != "active":
+                return None
+            product = db.execute("SELECT * FROM product_releases WHERE product_id=? AND release_status='approved_for_sale'",
+                                 (entitlement["product_id"],)).fetchone()
+            if product is None:
+                return None
+            db.execute("UPDATE product_download_tokens SET download_count=download_count+1,last_downloaded_at=? WHERE token_hash=?",
+                       (now.isoformat(), token_hash))
+            item = dict(product)
+            item["manifest_json"] = json.loads(item["manifest_json"])
+            return item
 
     def save_product_release(self, release: dict, artifact: bytes):
         if not isinstance(artifact, bytes) or not artifact or len(artifact) > MAX_PRODUCT_ARTIFACT_BYTES:
