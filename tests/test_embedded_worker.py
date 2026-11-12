@@ -24,7 +24,7 @@ class EmbeddedWorkerTests(unittest.TestCase):
             "SUPABASE_DB_GATE_KEY": "test-gate",
             "GEMINI_API_KEY": "test-gemini",
         }
-        with patch.dict(os.environ, env), patch("app.run_forever", side_effect=fake_loop):
+        with patch.dict(os.environ, env), patch("app.run_supervised", side_effect=fake_loop):
             app.start_embedded_worker()
             self.assertTrue(started.wait(1))
             status = app.worker_status()
