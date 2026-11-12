@@ -409,6 +409,71 @@ def _load_bmc_product_level_map() -> dict:
     return value
 
 
+async def _deliver_product_entitlement(entitlement: dict, release: dict) -> str:
+    entitlement_id = entitlement["entitlement_id"]
+    if release.get("release_status") != "approved_for_sale":
+        return "pending"
+    recipient = str(entitlement.get("buyer_email") or "").strip()
+    if not recipient:
+        store.update_product_entitlement_delivery(entitlement_id, "manual_required")
+        await asyncio.to_thread(
+            notify_owner,
+            f"💳 Ürün satın alımı bekliyor; alıcı e-postası yok.\n"
+            f"Ürün: {release['name']}\nAbonelik: {entitlement['subscription_id']}"
+        )
+        return "manual_required"
+
+    existing_token = store.get_product_download_token_for_entitlement(entitlement_id)
+    if existing_token:
+        return entitlement.get("delivery_status") or "token_exists"
+
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    token_created = store.create_product_download_token(
+        entitlement_id, token_hash, expires_at, max_downloads=5
+    )
+    if not token_created:
+        return "token_exists"
+
+    download_url = (
+        os.getenv("APP_PUBLIC_URL", "https://ai-company-ferd.onrender.com").rstrip("/")
+        + "/download/" + token
+    )
+    try:
+        sent = await asyncio.to_thread(
+            send_product_delivery_email, recipient,
+            entitlement.get("buyer_name") or "", release["name"], download_url,
+        )
+    except Exception as exc:
+        print(f"product_delivery: email failed; error_type={type(exc).__name__}", flush=True)
+        sent = False
+    status = "sent" if sent else "manual_required"
+    store.update_product_entitlement_delivery(entitlement_id, status)
+    if not sent:
+        await asyncio.to_thread(
+            notify_owner,
+            f"💳 Ürün satışı alındı; e-posta gönderilemedi.\n"
+            f"Alıcı: {recipient}\nÜrün: {release['name']}\n"
+            f"Teslimat bağlantısı (7 gün / 5 indirme):\n{download_url}"
+        )
+    return status
+
+
+@app.post("/api/payments/entitlements/{subscription_id}/deliver",
+          dependencies=[Depends(require_api_key)])
+async def deliver_pending_product_entitlement(subscription_id: str):
+    entitlement = store.get_product_entitlement_by_subscription(subscription_id)
+    if not entitlement:
+        raise HTTPException(status_code=404, detail="Product entitlement not found.")
+    release = store.get_product_release(entitlement["product_id"])
+    if not release:
+        raise HTTPException(status_code=404, detail="Product release not found.")
+    status = await _deliver_product_entitlement(entitlement, release)
+    return {"ok": status in {"sent", "pending", "manual_required", "token_exists"},
+            "delivery_status": status, "entitlement_id": entitlement["entitlement_id"]}
+
+
 @app.post("/webhooks/buymeacoffee")
 async def buymeacoffee_webhook(request: Request,
                                signature: str | None = Header(default=None, alias="x-signature-sha256")):
@@ -624,19 +689,11 @@ async def buymeacoffee_webhook(request: Request,
     delivery_status = "no_product_mapping"
     if product_id:
         release = store.get_product_release(product_id)
-        if not release or release.get("release_status") != "approved_for_sale":
-            delivery_status = "blocked_unpublished"
+        if not release:
+            delivery_status = "blocked_missing_release"
             await asyncio.to_thread(
                 notify_owner,
-                f"💳 Ödeme alındı fakat ürün teslim edilmedi.\nÜrün: {product_id}\n"
-                "Ürün henüz onaylı satış sürümünde değil. Önce yayın onayı verin."
-            )
-        elif not membership.get("supporter_email"):
-            delivery_status = "manual_required"
-            await asyncio.to_thread(
-                notify_owner,
-                f"💳 Ödeme alındı fakat alıcı e-postası yok. Ürün: {product_id}\n"
-                "BMC kaydındaki alıcı e-postasını kontrol edin."
+                f"💳 Ödeme alındı ancak BMC eşlemesindeki ürün bulunamadı.\nÜrün ID: {product_id}"
             )
         else:
             entitlement_result = store.create_product_entitlement(
@@ -644,42 +701,15 @@ async def buymeacoffee_webhook(request: Request,
                 membership.get("supporter_email"), membership.get("supporter_name"),
             )
             entitlement = entitlement_result.get("entitlement") if entitlement_result else None
-            if entitlement_result and entitlement_result.get("created") and entitlement:
-                token = secrets.token_urlsafe(32)
-                token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-                expires_at = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
-                token_created = store.create_product_download_token(
-                    entitlement["entitlement_id"], token_hash, expires_at, max_downloads=5
-                )
-                if token_created:
-                    download_url = (
-                        os.getenv("APP_PUBLIC_URL", "https://ai-company-ferd.onrender.com").rstrip("/")
-                        + "/download/" + token
+            if entitlement:
+                delivery_status = await _deliver_product_entitlement(entitlement, release)
+                if delivery_status == "pending":
+                    await asyncio.to_thread(
+                        notify_owner,
+                        f"💳 Ödeme alındı; ürün teslimatı yayın onayını bekliyor.\n"
+                        f"Ürün: {release['name']}\nAbonelik: {subscription_id}\n"
+                        "Ürünü yayınladıktan sonra /api/payments/entitlements/{subscription_id}/deliver çağrısını yapın."
                     )
-                    try:
-                        sent = await asyncio.to_thread(
-                            send_product_delivery_email, membership["supporter_email"],
-                            membership.get("supporter_name") or "", release["name"], download_url,
-                        )
-                    except Exception as exc:
-                        print(f"product_delivery: email failed; error_type={type(exc).__name__}", flush=True)
-                        sent = False
-                    delivery_status = "sent" if sent else "manual_required"
-                    store.update_product_entitlement_delivery(entitlement["entitlement_id"], delivery_status)
-                    if not sent:
-                        await asyncio.to_thread(
-                            notify_owner,
-                            f"💳 Ürün satışı alındı; e-posta gönderilemedi.\n"
-                            f"Alıcı: {membership['supporter_email']}\nÜrün: {release['name']}\n"
-                            f"Tek kullanımlık teslimat bağlantısı (7 gün / 5 indirme):\n{download_url}"
-                        )
-                else:
-                    delivery_status = "manual_required"
-                    store.update_product_entitlement_delivery(entitlement["entitlement_id"], delivery_status)
-                    await asyncio.to_thread(notify_owner,
-                        f"💳 Ödeme alındı; indirme tokenı oluşturulamadı. Entitlement: {entitlement['entitlement_id']}")
-            elif entitlement:
-                delivery_status = entitlement.get("delivery_status", "already_entitled")
     else:
         await asyncio.to_thread(
             notify_owner,
