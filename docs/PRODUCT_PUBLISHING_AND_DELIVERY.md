@@ -32,7 +32,9 @@ Also configure `BMC_WEBHOOK_SECRET` and `APP_PUBLIC_URL`. The legacy `BMC_PRO_ME
 ## Delivery behavior
 
 - A verified live BMC membership event is recorded in the payment ledger.
-- Only a product with status `approved_for_sale` receives an entitlement.
+- A payment creates an entitlement as long as the mapped product release exists. If the release is not yet published, the entitlement remains pending rather than being lost.
+- Only a product with status `approved_for_sale` receives a download token.
+- After publishing a previously pending release, the owner can call `POST /api/payments/entitlements/{subscription_id}/deliver` to finish delivery.
 - The system creates a random download token; only its SHA-256 hash is stored.
 - The link expires after 7 days and allows up to 5 downloads.
 - Refund, cancellation or pause revokes the entitlement.
