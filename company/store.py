@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
+import base64
+import hashlib
 import os
 import sqlite3
 import uuid
@@ -15,6 +17,7 @@ DB_PATH = ROOT / "data" / "company.db"
 # comfortably exceed the slowest single LLM call (retries and timeouts included),
 # otherwise a second worker re-claims a task that is still being processed.
 STALE_LEASE_MINUTES = 15
+MAX_PRODUCT_ARTIFACT_BYTES = 1_500_000
 
 
 def utc_now() -> str:
@@ -314,6 +317,43 @@ class SupabaseTaskStore:
         return rows
 
 
+
+    def save_product_release(self, release: dict, artifact: bytes):
+        if not isinstance(artifact, bytes) or not artifact or len(artifact) > MAX_PRODUCT_ARTIFACT_BYTES:
+            raise ValueError("Product artifact is empty or exceeds the 1.5 MB storage limit")
+        digest = hashlib.sha256(artifact).hexdigest()
+        if release.get("checksum") and release["checksum"] != digest:
+            raise ValueError("Product artifact checksum does not match release metadata")
+        manifest = {k: v for k, v in release.items()
+                    if k not in {"download_path", "checksum_path", "backup_path"}}
+        item = {
+            "product_id": release["product_id"],
+            "name": release["name"],
+            "version": release["version"],
+            "summary": release.get("summary", ""),
+            "release_status": release.get("release_status", "review_required"),
+            "manifest_json": manifest,
+            "artifact_base64": base64.b64encode(artifact).decode("ascii"),
+            "sha256": digest,
+            "artifact_bytes": len(artifact),
+            "created_at": release.get("created_at") or utc_now(),
+        }
+        self._request("product_releases", "POST", {"on_conflict": "product_id"}, item,
+                     "resolution=merge-duplicates,return=minimal")
+        return self.get_product_release(item["product_id"])
+
+    def get_product_release(self, product_id: str):
+        rows = self._request("product_releases", params={
+            "select": "*", "product_id": f"eq.{product_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
+    def list_product_releases(self, limit: int = 50):
+        return self._request("product_releases", params={
+            "select": "product_id,name,version,summary,release_status,sha256,artifact_bytes,created_at",
+            "order": "created_at.desc", "limit": str(max(1, min(limit, 100))),
+        })
+
     def create_approval_request(self, action: str, scope: dict, requested_by: str, expires_hours: int = 24):
         now = datetime.now(timezone.utc)
         item = {
@@ -438,6 +478,15 @@ class TaskStore:
                     output_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
                     agent_id TEXT NOT NULL, output_text TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS product_releases (
+                    product_id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL,
+                    summary TEXT NOT NULL, release_status TEXT NOT NULL DEFAULT 'review_required',
+                    manifest_json TEXT NOT NULL, artifact_base64 TEXT NOT NULL,
+                    sha256 TEXT NOT NULL, artifact_bytes INTEGER NOT NULL CHECK(artifact_bytes > 0 AND artifact_bytes <= 1500000),
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_product_releases_created
+                    ON product_releases(created_at);
                 CREATE TABLE IF NOT EXISTS approval_requests (
                     approval_id TEXT PRIMARY KEY, action TEXT NOT NULL, scope_json TEXT NOT NULL,
                     requested_by TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending'
@@ -759,6 +808,53 @@ class TaskStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+
+
+    def save_product_release(self, release: dict, artifact: bytes):
+        if not isinstance(artifact, bytes) or not artifact or len(artifact) > MAX_PRODUCT_ARTIFACT_BYTES:
+            raise ValueError("Product artifact is empty or exceeds the 1.5 MB storage limit")
+        digest = hashlib.sha256(artifact).hexdigest()
+        if release.get("checksum") and release["checksum"] != digest:
+            raise ValueError("Product artifact checksum does not match release metadata")
+        manifest = {k: v for k, v in release.items()
+                    if k not in {"download_path", "checksum_path", "backup_path"}}
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO product_releases
+                   (product_id,name,version,summary,release_status,manifest_json,
+                    artifact_base64,sha256,artifact_bytes,created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(product_id) DO UPDATE SET
+                     manifest_json=excluded.manifest_json,
+                     artifact_base64=excluded.artifact_base64,
+                     sha256=excluded.sha256,
+                     artifact_bytes=excluded.artifact_bytes""",
+                (release["product_id"], release["name"], release["version"],
+                 release.get("summary", ""), release.get("release_status", "review_required"),
+                 json.dumps(manifest, ensure_ascii=False),
+                 base64.b64encode(artifact).decode("ascii"), digest, len(artifact),
+                 release.get("created_at") or utc_now()),
+            )
+        return self.get_product_release(release["product_id"])
+
+    def get_product_release(self, product_id: str):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM product_releases WHERE product_id=?", (product_id,)).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["manifest_json"] = json.loads(item["manifest_json"])
+        return item
+
+    def list_product_releases(self, limit: int = 50):
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT product_id,name,version,summary,release_status,sha256,
+                          artifact_bytes,created_at
+                   FROM product_releases ORDER BY created_at DESC LIMIT ?""",
+                (max(1, min(limit, 100)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def create_approval_request(self, action: str, scope: dict, requested_by: str, expires_hours: int = 24):
         now = datetime.now(timezone.utc)
