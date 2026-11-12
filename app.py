@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hmac
 import hashlib
 import json
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -756,6 +757,7 @@ def product_factory_status():
         "generation_requires_provider": provider_status()["ready"],
         "source_execution": False,
         "release_status": "review_required",
+        "artifact_storage": "Supabase/SQLite database with a 1.5 MB per-release cap",
     }
 
 
@@ -774,14 +776,28 @@ def product_factory_build(payload: ProductBuildInput):
     if not provider_status()["ready"]:
         raise HTTPException(status_code=503, detail="No AI provider is configured.")
     try:
-        return build_product(payload.name, payload.description,
-                             payload.product_type, payload.version)
+        release = build_product(payload.name, payload.description,
+                                payload.product_type, payload.version)
+        with open(release["download_path"], "rb") as artifact_file:
+            store.save_product_release(release, artifact_file.read())
+        return {k: v for k, v in release.items()
+                if k not in {"download_path", "checksum_path", "backup_path"}}
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.get("/api/factory/products", dependencies=[Depends(require_api_key)])
+def product_factory_list():
+    return {"products": store.list_product_releases(limit=50)}
+
+
 @app.get("/api/factory/products/{product_id}", dependencies=[Depends(require_api_key)])
 def product_factory_detail(product_id: str):
+    item = store.get_product_release(product_id)
+    if item:
+        manifest = item.get("manifest_json") or {}
+        return {**manifest, "release_status": item["release_status"],
+                "checksum": item["sha256"], "artifact_bytes": item["artifact_bytes"]}
     try:
         return product_metadata(product_id)
     except FileNotFoundError:
@@ -790,6 +806,21 @@ def product_factory_detail(product_id: str):
 
 @app.get("/api/factory/products/{product_id}/download", dependencies=[Depends(require_api_key)])
 def product_factory_download(product_id: str):
+    item = store.get_product_release(product_id)
+    if item:
+        try:
+            artifact = base64.b64decode(item["artifact_base64"], validate=True)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=503, detail="Stored product artifact is corrupt.") from exc
+        digest = hashlib.sha256(artifact).hexdigest()
+        if digest != item["sha256"] or len(artifact) != item["artifact_bytes"]:
+            raise HTTPException(status_code=503, detail="Stored product artifact failed integrity verification.")
+        filename = f"{item['product_id']}-v{item['version']}.zip"
+        return Response(
+            content=artifact,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     try:
         path = product_zip_path(product_id)
     except FileNotFoundError:
