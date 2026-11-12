@@ -519,7 +519,7 @@ class SaleWebhookTests(unittest.TestCase):
         artifact = b"sample-product-zip"
         digest = hashlib.sha256(artifact).hexdigest()
         release = {
-            "product_id": "prd-bmc-extra-594541", "name": "NetCmd PRO",
+            "product_id": "prd-594541abcdef", "name": "NetCmd PRO",
             "version": "1.0.0", "summary": "Network automation toolkit",
             "release_status": "review_required", "checksum": digest,
         }
