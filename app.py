@@ -233,6 +233,10 @@ def sales_page():
 def dashboard():
     return FileResponse(WEB_DIR / "index.html")
 
+@app.get("/payments")
+def payments_dashboard():
+    return FileResponse(WEB_DIR / "payments.html")
+
 
 @app.get("/checkout")
 def checkout():
