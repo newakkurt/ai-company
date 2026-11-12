@@ -155,10 +155,15 @@ def process_one_task(store=None, provider=None):
                 version="0.1.0",
                 provider=provider or get_provider(),
             )
+            with open(release["download_path"], "rb") as artifact_file:
+                store.save_product_release(release, artifact_file.read())
             store.record_agent_output(
                 task_id, "product_factory",
-                "Generated release metadata (source not executed):\n"
-                + json.dumps(release, ensure_ascii=False, indent=2),
+                "Generated durable release metadata (source not executed):\n"
+                + json.dumps({
+                    k: v for k, v in release.items()
+                    if k not in {"download_path", "checksum_path", "backup_path"}
+                }, ensure_ascii=False, indent=2),
             )
             results.append({"agent_id": "product_factory", "output": json.dumps(release, ensure_ascii=False)})
         store.complete_task(task_id, output_count=len(results))
