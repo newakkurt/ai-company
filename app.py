@@ -26,6 +26,7 @@ from company.notifier import (
     notify_cancellation,
     notify_sale,
     notify_unexpected_payment,
+    notify_owner,
 )
 from company.scheduler import auto_tasks_enabled
 from company.store import TaskStore
@@ -415,11 +416,153 @@ async def buymeacoffee_webhook(request: Request,
     }
     store.upsert_membership(membership)
     store.record_payment_event(event_key, event_type, subscription_id)
-    # After the event is recorded: a failed notification must not trigger provider retries.
-    await asyncio.to_thread(notify_sale, event_type, membership)
+    # Unique provider event ID is the financial ledger idempotency key.
+    # The webhook event row remains the processing/audit record; ledger insertion
+    # returns a row only for the first delivery, preventing duplicate sale alerts.
+    gross = amount
+    platform_fee = (gross * Decimal("0.05")).quantize(Decimal("0.01"))
+    processing_fee = (gross * Decimal("0.034") + Decimal("0.30")).quantize(Decimal("0.01"))
+    payout_fee_estimate = (gross * Decimal("0.005")).quantize(Decimal("0.01"))
+    ledger_row = {
+        "event_id": event_key, "event_type": event_type,
+        "subscription_id": subscription_id, "product_code": "netcmd_pro",
+        "gross_amount": str(gross), "currency": currency,
+        "platform_fee_amount": str(platform_fee),
+        "processing_fee_estimate": str(processing_fee),
+        "net_estimate": str(gross - platform_fee - processing_fee - payout_fee_estimate),
+        "entry_status": "recognized_estimate",
+        "provider_created_at": _iso_timestamp(event.get("created")),
+        "raw_event": event,
+    }
+    try:
+        if hasattr(store, "_request"):
+            inserted = store._request(
+                "payment_ledger", "POST", {"on_conflict": "event_id"}, ledger_row,
+                "resolution=ignore-duplicates,return=representation"
+            )
+            first_financial_record = bool(inserted)
+        else:
+            with store._connect() as db:
+                db.execute("""CREATE TABLE IF NOT EXISTS payment_ledger (
+                    event_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,subscription_id TEXT,
+                    product_code TEXT NOT NULL,gross_amount REAL NOT NULL,currency TEXT NOT NULL,
+                    platform_fee_amount REAL NOT NULL,processing_fee_estimate REAL NOT NULL,
+                    net_estimate REAL NOT NULL,entry_status TEXT NOT NULL,provider_created_at TEXT,
+                    received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,raw_event TEXT NOT NULL)""")
+                cur = db.execute("""INSERT OR IGNORE INTO payment_ledger
+                    (event_id,event_type,subscription_id,product_code,gross_amount,currency,
+                     platform_fee_amount,processing_fee_estimate,net_estimate,entry_status,
+                     provider_created_at,raw_event)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (event_key,event_type,subscription_id,"netcmd_pro",float(gross),currency,
+                     float(platform_fee),float(processing_fee),
+                     float(gross-platform_fee-processing_fee-payout_fee_estimate),
+                     "recognized_estimate",_iso_timestamp(event.get("created")),json.dumps(event)))
+                first_financial_record = cur.rowcount == 1
+    except Exception as exc:
+        print(f"payment_ledger: write failed; error_type={type(exc).__name__}", flush=True)
+        raise HTTPException(status_code=503, detail="Payment ledger temporarily unavailable.")
+    store.record_payment_event(event_key, event_type, subscription_id)
+    # Never send a second sale notification for a provider retry.
+    if first_financial_record:
+        await asyncio.to_thread(notify_sale, event_type, membership)
 
     return {"ok": True, "membership_status": "active", "task_id": task_id,
             "assigned_agents": len(load_agents())}
+
+
+
+class ProviderPayoutInput(BaseModel):
+    provider_payout_id: str = Field(min_length=2, max_length=180)
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    status: str = Field(default="paid", pattern="^(pending|paid|failed|reversed)$")
+    paid_at: datetime | None = None
+    note: str = Field(default="", max_length=500)
+
+
+class BankSettlementInput(BaseModel):
+    provider_payout_id: str = Field(min_length=2, max_length=180)
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    currency: str = Field(default="USD", min_length=3, max_length=3)
+    bank_reference: str = Field(default="", max_length=180)
+    received_at: datetime
+    note: str = Field(default="", max_length=500)
+
+
+@app.get("/api/payments/summary", dependencies=[Depends(require_api_key)])
+def payments_summary(months: int = 12):
+    months = max(1, min(months, 24))
+    try:
+        ledger = store._request("payment_ledger", params={
+            "select":"*", "order":"received_at.desc", "limit":"2000"
+        })
+        payouts = store._request("provider_payouts", params={
+            "select":"*", "order":"created_at.desc", "limit":"500"
+        })
+        settlements = store._request("bank_settlements", params={
+            "select":"*", "order":"received_at.desc", "limit":"500"
+        })
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Payment report unavailable: {type(exc).__name__}")
+    from collections import defaultdict
+    monthly = defaultdict(lambda: {"gross": Decimal("0"), "platform_fees": Decimal("0"),
+                                   "processing_fee_estimate": Decimal("0"), "net_estimate": Decimal("0"),
+                                   "events": 0})
+    for row in ledger:
+        key = str(row.get("received_at",""))[:7]
+        if not key: continue
+        bucket = monthly[key]
+        bucket["gross"] += Decimal(str(row.get("gross_amount",0)))
+        bucket["platform_fees"] += Decimal(str(row.get("platform_fee_amount",0)))
+        bucket["processing_fee_estimate"] += Decimal(str(row.get("processing_fee_estimate",0)))
+        bucket["net_estimate"] += Decimal(str(row.get("net_estimate",0)))
+        bucket["events"] += 1
+    def total(rows, key):
+        return str(sum((Decimal(str(row.get(key,0))) for row in rows), Decimal("0.00")).quantize(Decimal("0.01")))
+    return {
+        "currency_note":"Amounts are grouped by currency; do not combine currencies.",
+        "ledger_entries":len(ledger),
+        "gross_recorded":total(ledger,"gross_amount"),
+        "platform_fees_recorded_or_estimated":total(ledger,"platform_fee_amount"),
+        "processing_fees_estimated":total(ledger,"processing_fee_estimate"),
+        "provider_payouts":payouts,
+        "provider_payout_total":total(payouts,"amount"),
+        "bank_settlements":settlements,
+        "bank_received_total":total(settlements,"amount"),
+        "monthly":[{"month":k,**{n:(str(v) if isinstance(v,Decimal) else v) for n,v in val.items()}}
+                   for k,val in sorted(monthly.items())[-months:]],
+        "reconciliation":"Provider payouts and bank settlements are separate manual/provider records; bank receipt is never inferred from a sale webhook."
+    }
+
+
+@app.post("/api/payments/payouts", dependencies=[Depends(require_api_key)])
+def record_provider_payout(payload: ProviderPayoutInput):
+    try:
+        rows=store._request("provider_payouts","POST",{"on_conflict":"provider_payout_id"},{
+            "provider":"buymeacoffee","provider_payout_id":payload.provider_payout_id,
+            "amount":str(payload.amount),"currency":payload.currency.upper(),
+            "status":payload.status,"paid_at":payload.paid_at.isoformat() if payload.paid_at else None,
+            "note":payload.note
+        },"resolution=merge-duplicates,return=representation")
+        return {"ok":True,"payout":rows[0] if rows else None}
+    except Exception as exc:
+        raise HTTPException(status_code=503,detail=f"Payout record failed: {type(exc).__name__}")
+
+
+@app.post("/api/payments/bank-settlements", dependencies=[Depends(require_api_key)])
+def record_bank_settlement(payload: BankSettlementInput):
+    try:
+        rows=store._request("bank_settlements","POST",body={
+            "provider_payout_id":payload.provider_payout_id,
+            "amount":str(payload.amount),"currency":payload.currency.upper(),
+            "bank_reference":payload.bank_reference,
+            "received_at":payload.received_at.isoformat(),"note":payload.note
+        },prefer="return=representation")
+        awaitable = rows[0] if rows else None
+        return {"ok":True,"bank_settlement":awaitable}
+    except Exception as exc:
+        raise HTTPException(status_code=503,detail=f"Bank settlement record failed: {type(exc).__name__}")
 
 
 @app.get("/api/health", dependencies=[Depends(require_api_key)])
