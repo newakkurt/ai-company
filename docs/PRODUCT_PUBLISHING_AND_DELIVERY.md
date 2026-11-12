@@ -14,7 +14,7 @@ The approval is one-time and bound to that exact artifact checksum.
 
 ## Map Buy Me a Coffee Shop items
 
-For Shop Extras, set `BMC_EXTRA_PRODUCT_MAP` in Render. Keys are the item IDs in the webhook's `data.extras[].id`; values map each shop item to a published release and exact USD unit price:
+If the BMC products are listed under Shop, set `BMC_EXTRA_PRODUCT_MAP` in Render. Keys are the item IDs in the webhook's `data.extras[].id`; values map each shop item to a published release and exact USD unit price:
 
 ```json
 {
@@ -27,7 +27,7 @@ For Shop Extras, set `BMC_EXTRA_PRODUCT_MAP` in Render. Keys are the item IDs in
 }
 ```
 
-Also configure `BMC_WEBHOOK_SECRET` and `APP_PUBLIC_URL`. `BMC_PRODUCT_LEVEL_MAP` remains available only for membership-tier sales; it is not the Shop Extras map.
+Also configure `BMC_WEBHOOK_SECRET` and `APP_PUBLIC_URL`. If the items are membership tiers rather than Shop items, use `BMC_PRODUCT_LEVEL_MAP` instead.
 
 ## Delivery behavior
 
