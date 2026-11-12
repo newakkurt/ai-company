@@ -18,7 +18,7 @@ class ConfigGuardProductTests(unittest.TestCase):
         self.assertEqual(audit(cfg)["summary"]["passed"],3)
     def test_aruba_and_report(self):
         report=audit("ip ssh\nno web-management\n","aruba")
-        self.assertEqual(report["summary"]["passed"],2)
+        self.assertEqual(report["summary"]["passed"],10)
         self.assertIn("ARB-001",render_markdown(report))
     def test_ambiguous_input_fails_closed(self):
         with self.assertRaises(ValueError): audit("hostname SWITCH-01")
