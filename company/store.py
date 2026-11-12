@@ -318,6 +318,38 @@ class SupabaseTaskStore:
 
 
 
+    def reserve_mail_send(self, message_id: str, sender: str, max_total: int, max_sender: int) -> bool:
+        if not message_id or not sender:
+            return False
+        existing = self._request("mail_send_log", params={
+            "select": "message_id", "message_id": f"eq.{message_id}", "limit": "1",
+        })
+        if existing:
+            return False
+        now = datetime.now(timezone.utc)
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        rows = self._request("mail_send_log", params={
+            "select": "message_id,sender_email", "status": "in.(reserved,sent)",
+            "reserved_at": f"gte.{day_start}", "limit": "1000",
+        })
+        if len(rows) >= max_total:
+            return False
+        if sum(1 for row in rows if row.get("sender_email", "").casefold() == sender.casefold()) >= max_sender:
+            return False
+        created = self._request("mail_send_log", "POST", {"on_conflict": "message_id"}, {
+            "message_id": message_id, "sender_email": sender.casefold(),
+            "status": "reserved", "reserved_at": now.isoformat(),
+        }, "resolution=ignore-duplicates,return=representation")
+        return bool(created)
+
+    def update_mail_send(self, message_id: str, status: str, error_type: str | None = None):
+        if status not in ("sent", "failed"):
+            raise ValueError("Invalid mail send status")
+        return self._request("mail_send_log", "PATCH", {
+            "message_id": f"eq.{message_id}", "status": "eq.reserved",
+        }, {"status": status, "sent_at": utc_now() if status == "sent" else None,
+            "error_type": error_type}, "return=minimal")
+
     def save_product_release(self, release: dict, artifact: bytes):
         if not isinstance(artifact, bytes) or not artifact or len(artifact) > MAX_PRODUCT_ARTIFACT_BYTES:
             raise ValueError("Product artifact is empty or exceeds the 1.5 MB storage limit")
@@ -478,6 +510,14 @@ class TaskStore:
                     output_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
                     agent_id TEXT NOT NULL, output_text TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS mail_send_log (
+                    message_id TEXT PRIMARY KEY, sender_email TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'reserved'
+                        CHECK(status IN ('reserved','sent','failed')),
+                    reserved_at TEXT NOT NULL, sent_at TEXT, error_type TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_mail_send_log_daily
+                    ON mail_send_log(reserved_at, status, sender_email);
                 CREATE TABLE IF NOT EXISTS product_releases (
                     product_id TEXT PRIMARY KEY, name TEXT NOT NULL, version TEXT NOT NULL,
                     summary TEXT NOT NULL, release_status TEXT NOT NULL DEFAULT 'review_required',
@@ -809,6 +849,42 @@ class TaskStore:
             return [dict(row) for row in rows]
 
 
+
+    def reserve_mail_send(self, message_id: str, sender: str, max_total: int, max_sender: int) -> bool:
+        if not message_id or not sender:
+            return False
+        now = datetime.now(timezone.utc)
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        with self._connect() as db:
+            existing = db.execute(
+                "SELECT message_id FROM mail_send_log WHERE message_id=?", (message_id,)
+            ).fetchone()
+            if existing:
+                return False
+            rows = db.execute(
+                "SELECT sender_email FROM mail_send_log WHERE status IN ('reserved','sent') AND reserved_at>=?",
+                (day_start,),
+            ).fetchall()
+            if len(rows) >= max_total:
+                return False
+            if sum(1 for row in rows if row["sender_email"].casefold() == sender.casefold()) >= max_sender:
+                return False
+            db.execute(
+                "INSERT INTO mail_send_log(message_id,sender_email,status,reserved_at) VALUES(?,?,'reserved',?)",
+                (message_id, sender.casefold(), now.isoformat()),
+            )
+        return True
+
+    def update_mail_send(self, message_id: str, status: str, error_type: str | None = None):
+        if status not in ("sent", "failed"):
+            raise ValueError("Invalid mail send status")
+        with self._connect() as db:
+            db.execute(
+                """UPDATE mail_send_log SET status=?, sent_at=?, error_type=?
+                   WHERE message_id=? AND status='reserved'""",
+                (status, utc_now() if status == "sent" else None, error_type, message_id),
+            )
+        return True
 
     def save_product_release(self, release: dict, artifact: bytes):
         if not isinstance(artifact, bytes) or not artifact or len(artifact) > MAX_PRODUCT_ARTIFACT_BYTES:
