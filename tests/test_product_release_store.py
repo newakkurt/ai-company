@@ -45,8 +45,6 @@ class ProductReleaseStoreTests(unittest.TestCase):
                 store.save_product_release(release, b"x" * 1_500_001)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
     def test_approved_product_entitlement_has_limited_download_token(self):
         import datetime
@@ -111,3 +109,6 @@ if __name__ == "__main__":
                        - datetime.timedelta(days=1)).isoformat()
             store.create_product_download_token(ent["entitlement_id"], token_hash, expired, 5)
             self.assertIsNone(store.consume_product_download(token_hash))
+
+if __name__ == "__main__":
+    unittest.main()
