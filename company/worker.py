@@ -18,6 +18,41 @@ REQUIRED_ENV = (
 )
 SEED_INTERVAL_SECONDS = 300
 
+_SUPERVISOR_STATE = {"restart_count": 0, "last_restart_at": None, "last_error_type": None}
+
+
+def supervisor_status():
+    """Safe operational counters for the hosted readiness endpoint."""
+    return dict(_SUPERVISOR_STATE)
+
+
+def run_supervised(stop_event=None, poll_seconds: int = 15,
+                   initial_backoff_seconds: int = 5,
+                   max_backoff_seconds: int = 120):
+    """Keep the durable queue consumer alive after unexpected worker-loop exits."""
+    stop_event = stop_event or threading.Event()
+    backoff = max(1, initial_backoff_seconds)
+    while not stop_event.is_set():
+        try:
+            run_forever(stop_event=stop_event, poll_seconds=poll_seconds)
+            if stop_event.is_set():
+                break
+            raise RuntimeError("worker_loop_exited_unexpectedly")
+        except Exception as exc:  # noqa: BLE001 - supervisor must survive worker failures
+            _SUPERVISOR_STATE["restart_count"] += 1
+            _SUPERVISOR_STATE["last_restart_at"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+            )
+            _SUPERVISOR_STATE["last_error_type"] = type(exc).__name__
+            print(
+                "agent_worker: supervisor restarting worker loop; "
+                f"restart_count={_SUPERVISOR_STATE['restart_count']} "
+                f"error_type={type(exc).__name__} backoff_seconds={backoff}",
+                file=sys.stderr, flush=True,
+            )
+            stop_event.wait(backoff)
+            backoff = min(max_backoff_seconds, backoff * 2)
+
 
 def _safe_notify(func, *args):
     """Notifications are best-effort and must never change a task's outcome."""
