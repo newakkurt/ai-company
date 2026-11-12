@@ -114,6 +114,8 @@ interface GigabitEthernet1/0/1
     def test_redaction_helper(self):
         self.assertEqual(redact_evidence("snmp-server community my-secret ro"),
                          "snmp-server community [REDACTED] ro")
+        self.assertEqual(redact_evidence("snmp-agent community read cipher my-huawei-secret"),
+                         "snmp-agent community read cipher [REDACTED]")
 
 if __name__=="__main__":
     unittest.main()
