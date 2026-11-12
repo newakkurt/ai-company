@@ -396,6 +396,161 @@ def _iso_timestamp(value: Any) -> str | None:
         return None
 
 
+def _load_bmc_extra_product_map() -> dict:
+    raw = os.getenv("BMC_EXTRA_PRODUCT_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=503, detail="BMC_EXTRA_PRODUCT_MAP is invalid JSON.") from exc
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=503, detail="BMC_EXTRA_PRODUCT_MAP must be a JSON object.")
+    return value
+
+
+def _bmc_extra_reference(payment_id: Any, extra_id: Any, index: int) -> str:
+    safe_payment = re.sub(r"[^A-Za-z0-9_-]", "-", str(payment_id or "unknown"))[:45]
+    safe_extra = re.sub(r"[^A-Za-z0-9_-]", "-", str(extra_id or "unknown"))[:30]
+    return f"bmc-extra-{safe_payment}-{safe_extra}-{index}"[:120]
+
+
+def _write_payment_ledger_row(ledger_row: dict) -> bool:
+    if hasattr(store, "_request"):
+        rows = store._request(
+            "payment_ledger", "POST", {"on_conflict": "event_id"}, ledger_row,
+            "resolution=ignore-duplicates,return=representation"
+        )
+        return bool(rows)
+    with store._connect() as db:
+        db.execute("""CREATE TABLE IF NOT EXISTS payment_ledger (
+            event_id TEXT PRIMARY KEY,event_type TEXT NOT NULL,subscription_id TEXT,
+            product_code TEXT NOT NULL,gross_amount REAL NOT NULL,currency TEXT NOT NULL,
+            platform_fee_amount REAL NOT NULL,processing_fee_estimate REAL NOT NULL,
+            net_estimate REAL NOT NULL,entry_status TEXT NOT NULL,provider_created_at TEXT,
+            received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,raw_event TEXT NOT NULL)""")
+        cur = db.execute("""INSERT OR IGNORE INTO payment_ledger
+            (event_id,event_type,subscription_id,product_code,gross_amount,currency,
+             platform_fee_amount,processing_fee_estimate,net_estimate,entry_status,
+             provider_created_at,raw_event) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (ledger_row["event_id"], ledger_row["event_type"], ledger_row.get("subscription_id"),
+             ledger_row["product_code"], float(ledger_row["gross_amount"]), ledger_row["currency"],
+             float(ledger_row["platform_fee_amount"]), float(ledger_row["processing_fee_estimate"]),
+             float(ledger_row["net_estimate"]), ledger_row["entry_status"],
+             ledger_row.get("provider_created_at"), json.dumps(ledger_row["raw_event"])))
+    return cur.rowcount == 1
+
+
+async def _handle_bmc_extra_purchase(event: dict, event_key: str, data: dict):
+    extra_map = _load_bmc_extra_product_map()
+    if not extra_map:
+        raise HTTPException(status_code=503, detail="BMC_EXTRA_PRODUCT_MAP is not configured.")
+    extras = data.get("extras")
+    if not isinstance(extras, list) or not extras:
+        raise HTTPException(status_code=400, detail="BMC extra purchase contains no shop items.")
+
+    payment_id = data.get("id") or data.get("transaction_id") or data.get("psp_id")
+    if not payment_id:
+        raise HTTPException(status_code=400, detail="BMC extra purchase has no payment identifier.")
+    statuses = []
+    for index, extra in enumerate(extras):
+        if not isinstance(extra, dict):
+            raise HTTPException(status_code=400, detail="Invalid BMC extra item.")
+        extra_id = str(extra.get("id") or "").strip()
+        mapping = extra_map.get(extra_id)
+        if isinstance(mapping, str):
+            mapping = {"product_id": mapping}
+        if not extra_id or not isinstance(mapping, dict):
+            await asyncio.to_thread(
+                notify_owner,
+                f"⚠️ BMC shop item eşlemesi eksik. Extra ID: {extra_id or 'missing'}; "
+                "BMC_EXTRA_PRODUCT_MAP ayarını tamamlayın."
+            )
+            raise HTTPException(status_code=503, detail=f"BMC shop item {extra_id or 'unknown'} is not mapped.")
+
+        product_id = str(mapping.get("product_id") or "").strip()
+        if not product_id:
+            raise HTTPException(status_code=503, detail=f"BMC shop item {extra_id} has no product_id mapping.")
+        try:
+            quantity = int(extra.get("quantity", 1))
+            item_amount = Decimal(str(extra.get("amount", "0")))
+            expected_unit_price = Decimal(str(mapping.get("price_usd", "0")))
+        except (ValueError, InvalidOperation):
+            raise HTTPException(status_code=400, detail=f"Invalid price or quantity for BMC shop item {extra_id}.")
+        if quantity < 1 or quantity > 100 or item_amount <= 0 or expected_unit_price <= 0:
+            raise HTTPException(status_code=400, detail=f"Invalid price or quantity for BMC shop item {extra_id}.")
+        currency = str(extra.get("currency") or data.get("currency") or "").upper()
+        expected_total = expected_unit_price * quantity
+        if currency != "USD" or item_amount not in {expected_unit_price, expected_total}:
+            await asyncio.to_thread(
+                notify_owner,
+                f"⚠️ BMC shop item fiyat/para birimi eşleşmedi. Extra ID: {extra_id}; "
+                f"gelen: {item_amount} {currency}; beklenen birim: {expected_unit_price} USD."
+            )
+            raise HTTPException(status_code=503, detail=f"Price/currency mismatch for BMC shop item {extra_id}.")
+        gross = item_amount * quantity if item_amount == expected_unit_price else item_amount
+
+        release = store.get_product_release(product_id)
+        if not release:
+            await asyncio.to_thread(
+                notify_owner,
+                f"⚠️ BMC shop item {extra_id} için product_id bulunamadı: {product_id}"
+            )
+            raise HTTPException(status_code=503, detail=f"Mapped product release {product_id} was not found.")
+
+        extra_ref = _bmc_extra_reference(payment_id, extra_id, index)
+        item_event_key = "bmc-extra-" + hashlib.sha256(
+            f"{payment_id}|{extra_id}|{index}".encode("utf-8")
+        ).hexdigest()
+        ledger_exists = store.get_payment_event(item_event_key)
+        if not ledger_exists:
+            order_total = Decimal(str(data.get("amount", gross)))
+            application_fee = Decimal(str(data.get("application_fee", "0") or "0"))
+            if order_total > 0 and application_fee > 0:
+                platform_fee = (application_fee * gross / order_total).quantize(Decimal("0.01"))
+            else:
+                platform_fee = (gross * Decimal("0.05")).quantize(Decimal("0.01"))
+            processing_fee = (gross * Decimal("0.034") + Decimal("0.30")).quantize(Decimal("0.01"))
+            payout_fee = (gross * Decimal("0.005")).quantize(Decimal("0.01"))
+            product_code = str(mapping.get("product_code") or product_id)[:80]
+            ledger_row = {
+                "event_id": item_event_key, "event_type": "extra_purchase.created",
+                "subscription_id": extra_ref, "product_code": product_code,
+                "gross_amount": str(gross), "currency": currency,
+                "platform_fee_amount": str(platform_fee),
+                "processing_fee_estimate": str(processing_fee),
+                "net_estimate": str(gross - platform_fee - processing_fee - payout_fee),
+                "entry_status": "recognized_estimate",
+                "provider_created_at": _iso_timestamp(data.get("created_at") or event.get("created")),
+                "raw_event": {"event": event, "extra": extra},
+            }
+            try:
+                _write_payment_ledger_row(ledger_row)
+            except Exception as exc:
+                print(f"payment_ledger: extra write failed; error_type={type(exc).__name__}", flush=True)
+                raise HTTPException(status_code=503, detail="Payment ledger temporarily unavailable.")
+
+        entitlement_result = store.create_product_entitlement(
+            item_event_key, extra_ref, product_id,
+            data.get("supporter_email"), data.get("supporter_name"),
+        )
+        entitlement = entitlement_result.get("entitlement") if entitlement_result else None
+        if not entitlement:
+            raise HTTPException(status_code=503, detail="Could not create product entitlement.")
+        status = await _deliver_product_entitlement(entitlement, release)
+        store.record_payment_event(item_event_key, "extra_purchase.created", extra_ref)
+        statuses.append({"extra_id": extra_id, "product_id": product_id, "delivery_status": status})
+        await asyncio.to_thread(notify_sale, "extra_purchase.created", {
+            "supporter_email": data.get("supporter_email"),
+            "supporter_name": data.get("supporter_name"),
+            "membership_level_name": str(mapping.get("product_name") or extra.get("title") or release["name"]),
+            "amount": str(gross), "currency": currency, "delivery_status": status,
+        })
+
+    store.record_payment_event(event_key, "extra_purchase.created", str(payment_id))
+    return {"ok": True, "items_processed": len(statuses), "items": statuses}
+
+
 def _load_bmc_product_level_map() -> dict:
     raw = os.getenv("BMC_PRODUCT_LEVEL_MAP", "").strip()
     if not raw:
@@ -500,7 +655,8 @@ async def buymeacoffee_webhook(request: Request,
     cycle = data.get("current_period_start") or data.get("started_at") or data.get("refunded_at") or event.get("created") or ""
     stable_material = "|".join(str(v or "") for v in (
         event_type, identity, cycle, data.get("amount"), data.get("currency"),
-        data.get("status"), data.get("membership_level_id")
+        data.get("status"), data.get("membership_level_id"),
+        json.dumps(data.get("extras") or [], sort_keys=True, default=str)
     ))
     event_key = "bmc-" + hashlib.sha256(stable_material.encode("utf-8")).hexdigest()
     if store.get_payment_event(event_key):
@@ -536,12 +692,24 @@ async def buymeacoffee_webhook(request: Request,
             store.record_payment_event(event_key, event_type, refund_subscription)
             if refund_subscription:
                 store.update_product_entitlement_status(refund_subscription, "refunded")
+            if event_type == "extra_purchase.refunded":
+                payment_id = data.get("id") or data.get("transaction_id") or data.get("psp_id")
+                for index, extra in enumerate(data.get("extras") or []):
+                    if isinstance(extra, dict):
+                        extra_ref = _bmc_extra_reference(payment_id, extra.get("id"), index)
+                        store.update_product_entitlement_status(extra_ref, "refunded")
             if first_refund_record:
                 await asyncio.to_thread(notify_unexpected_payment, event_type,
                     "İade olayı kaydedildi; BMC panelindeki gerçek iade tutarı ve bakiyeyle mutabakat yapın", data)
             return {"ok": True, "refund_recorded": first_refund_record}
         except (ValueError, InvalidOperation):
             raise HTTPException(status_code=400, detail="Invalid refund amount or currency.")
+
+    if event_type == "extra_purchase.created":
+        return await _handle_bmc_extra_purchase(event, event_key, data)
+    if event_type == "extra_purchase.updated":
+        store.record_payment_event(event_key, event_type, str(data.get("id") or data.get("transaction_id") or ""))
+        return {"ok": True, "order_updated": True}
 
     supported = {"membership.started", "membership.updated", "membership.cancelled", "membership.paused"}
     if event_type not in supported:
