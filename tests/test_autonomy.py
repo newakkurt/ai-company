@@ -497,6 +497,72 @@ class SaleWebhookTests(unittest.TestCase):
             count = db.execute("SELECT COUNT(*) FROM payment_ledger").fetchone()[0]
         self.assertEqual(count, 2)
 
+    def _extra_event(self, event_type="extra_purchase.created", event_id="extra-event-1"):
+        return {
+            "event_id": event_id, "type": event_type, "live_mode": True, "created": 1730000000,
+            "data": {
+                "id": 98765, "object": "payment", "transaction_id": "pi_extra_98765",
+                "status": "succeeded" if event_type == "extra_purchase.created" else "refunded",
+                "refunded": "true" if event_type.endswith(".refunded") else "false",
+                "amount": 30.0, "currency": "USD", "application_fee": 1.5,
+                "support_type": "Extra", "supporter_name": "Buyer",
+                "supporter_email": "buyer@example.com", "created_at": 1730000000,
+                "extras": [{
+                    "id": 594541, "object": "extra", "title": "NetCmd PRO",
+                    "description": "Network automation toolkit", "amount": 30.0,
+                    "quantity": 1, "currency": "USD",
+                }],
+            },
+        }
+
+    def _save_approved_release(self):
+        artifact = b"sample-product-zip"
+        digest = hashlib.sha256(artifact).hexdigest()
+        release = {
+            "product_id": "prd-bmc-extra-594541", "name": "NetCmd PRO",
+            "version": "1.0.0", "summary": "Network automation toolkit",
+            "release_status": "review_required", "checksum": digest,
+        }
+        self.store.save_product_release(release, artifact)
+        self.store.update_product_release_status(release["product_id"], "approved_for_sale")
+        return release
+
+    def test_extra_purchase_created_delivers_shop_product_once(self):
+        release = self._save_approved_release()
+        mapping = {"594541": {
+            "product_id": release["product_id"], "product_code": "netcmd_pro",
+            "product_name": "NetCmd PRO", "price_usd": "30.00",
+        }}
+        with patch.dict(os.environ, {"BMC_EXTRA_PRODUCT_MAP": json.dumps(mapping)}), \
+             patch("app.send_product_delivery_email", return_value=True) as send, \
+             patch("app.notify_sale") as sale:
+            result = self.call(self._extra_event())
+            duplicate = self.call(self._extra_event(event_id="extra-event-retry"))
+        self.assertEqual(result["items_processed"], 1)
+        self.assertEqual(result["items"][0]["delivery_status"], "sent")
+        self.assertTrue(duplicate["duplicate"])
+        send.assert_called_once()
+        sale.assert_called_once()
+        with self.store._connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM payment_ledger").fetchone()[0], 1)
+            entitlement = db.execute("SELECT * FROM product_entitlements").fetchone()
+        self.assertEqual(entitlement["delivery_status"], "sent")
+
+    def test_extra_purchase_refund_revokes_download_entitlement(self):
+        release = self._save_approved_release()
+        mapping = {"594541": {
+            "product_id": release["product_id"], "product_code": "netcmd_pro",
+            "product_name": "NetCmd PRO", "price_usd": "30.00",
+        }}
+        with patch.dict(os.environ, {"BMC_EXTRA_PRODUCT_MAP": json.dumps(mapping)}), \
+             patch("app.send_product_delivery_email", return_value=True), \
+             patch("app.notify_sale"), patch("app.notify_unexpected_payment"):
+            self.call(self._extra_event())
+            self.call(self._extra_event("extra_purchase.refunded", "extra-refund-1"))
+        with self.store._connect() as db:
+            row = db.execute("SELECT status FROM product_entitlements").fetchone()
+        self.assertEqual(row["status"], "refunded")
+
     def test_bmc_product_map_is_parsed_from_json(self):
         mapping = {"99": {"product_id": "prd-abcdef123456", "price_usd": "30.00"}}
         with patch.dict(os.environ, {"BMC_PRODUCT_LEVEL_MAP": json.dumps(mapping)}):
