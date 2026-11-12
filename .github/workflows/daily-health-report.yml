@@ -1,0 +1,104 @@
+name: Daily AI Company health report
+
+on:
+  schedule:
+    - cron: "5 3 * * *" # 06:05 Türkiye time
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-company-daily-health-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Collect and validate hosted health
+        id: health
+        env:
+          READY_URL: https://ai-company-ferd.onrender.com/readyz
+        run: |
+          python - <<'PY'
+          import json, os, sys, urllib.request
+          url = os.environ["READY_URL"]
+          req = urllib.request.Request(url, headers={"Accept": "application/json"})
+          with urllib.request.urlopen(req, timeout=25) as response:
+              if response.status != 200:
+                  raise SystemExit(f"Health endpoint returned HTTP {response.status}")
+              data = json.loads(response.read().decode())
+          provider = data.get("provider") or {}
+          database = data.get("database") or {}
+          worker = data.get("worker") or {}
+          services = data.get("services") or {}
+          checks = {
+              "API": data.get("ok") is True,
+              "14 agents": data.get("agents") == 14,
+              "Gemini primary configured": provider.get("gemini") is True,
+              "AI provider ready": provider.get("ready") is True,
+              "Supabase connected": database.get("backend") == "supabase" and database.get("connected") is True and database.get("error") is None,
+              "Worker enabled": worker.get("enabled") is True,
+              "Worker running": worker.get("running") is True,
+              "Analysis-only safety": data.get("mode") == "analysis_only" and data.get("external_actions_enabled") is False,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          state = "HEALTHY" if not failed else "DEGRADED"
+          lines = [
+              f"AI Company daily health: {state}",
+              f"Agents: {data.get('agents', 'unknown')}/14",
+              f"Gemini: {'ready' if provider.get('ready') and provider.get('gemini') else 'not ready'} ({provider.get('model', 'unknown')})",
+              f"Groq fallback configured: {bool(provider.get('groq'))}",
+              f"Database: {database.get('backend', 'unknown')} / {'connected' if database.get('connected') else 'disconnected'}",
+              f"Worker: {'running' if worker.get('running') else 'stopped'}; restarts={worker.get('restart_count', 0)}",
+              f"Worker last restart: {worker.get('last_restart_at') or 'none recorded'}",
+              f"Mail loop: {'running' if (services.get('mail') or {}).get('running') else 'not running'}",
+              f"Safety mode: {data.get('mode', 'unknown')}; external actions={data.get('external_actions_enabled')}",
+              "Checks: " + ", ".join(f"{'PASS' if ok else 'FAIL'} {name}" for name, ok in checks.items()),
+          ]
+          if failed:
+              lines.append("Attention required: " + ", ".join(failed))
+          report = "\\n".join(lines)
+          print(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write("## " + lines[0] + "\\n\\n")
+              f.write("\\n".join("- " + line for line in lines[1:]) + "\\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write("state=" + state + "\\n")
+              f.write("report<<REPORT\\n" + report + "\\nREPORT\\n")
+          if failed:
+              sys.exit(1)
+          PY
+      - name: Send daily report to Telegram when configured
+        if: always()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPORT: ${{ steps.health.outputs.report }}
+        run: |
+          if [ -z "$BOT_TOKEN" ] || [ -z "$CHAT_ID" ] || [ -z "$REPORT" ]; then
+            echo "Telegram delivery skipped: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID secrets are not configured."
+            exit 0
+          fi
+          python - <<'PY'
+          import json, os, urllib.request
+          token = os.environ["BOT_TOKEN"]
+          payload = json.dumps({
+              "chat_id": os.environ["CHAT_ID"],
+              "text": os.environ["REPORT"],
+              "disable_web_page_preview": True,
+          }).encode()
+          req = urllib.request.Request(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data=payload,
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=20) as response:
+              result = json.loads(response.read().decode())
+          if not result.get("ok"):
+              raise SystemExit("Telegram rejected the daily health report.")
+          print("Daily health report delivered to Telegram.")
+          PY
