@@ -67,7 +67,7 @@ Rule("HUA-R02","Legacy SNMP community present","high",r"(?im)^\s*snmp-agent\s+co
 Rule("HUA-R03","HTTP management enabled","high",r"(?im)^\s*http\s+server\s+enable\s*$","Disable plaintext HTTP management through an approved change."),
 ],
 "aruba": [
-Rule("ARB-R01","Telnet management enabled","high",r"(?im)^\s* telnet-server\s+enable\s*$","Disable Telnet only after validating secure management access."),
+Rule("ARB-R01","Telnet management enabled","high",r"(?im)^\s*telnet-server\s+enable\s*$","Disable Telnet only after validating secure management access."),
 Rule("ARB-R02","Legacy SNMP community present","high",r"(?im)^\s*snmp-server\s+community\s+\S+","Prefer SNMPv3 authPriv and rotate any exposed community string."),
 Rule("ARB-R03","Plaintext web management enabled","high",r"(?im)^\s*web-management\s*$","Disable plaintext web management through an approved change."),
 ]}
