@@ -534,6 +534,23 @@ class BankSettlementInput(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+@app.get("/api/payments/status", dependencies=[Depends(require_api_key)])
+def payments_status():
+    webhook_secret = bool(os.getenv("BMC_WEBHOOK_SECRET", "").strip())
+    membership_level = bool(os.getenv("BMC_PRO_MEMBERSHIP_LEVEL_ID", "").strip())
+    checkout = os.getenv("BMC_PRO_CHECKOUT_URL", "https://buymeacoffee.com/sevketkaynar").strip()
+    return {
+        "provider":"Buy Me a Coffee",
+        "price_usd":os.getenv("BMC_PRO_PRICE_USD","69"),
+        "checkout_configured":checkout.startswith("https://buymeacoffee.com/"),
+        "webhook_secret_configured":webhook_secret,
+        "membership_level_configured":membership_level,
+        "ready_for_live_membership":bool(webhook_secret and membership_level and checkout.startswith("https://buymeacoffee.com/")),
+        "webhook_endpoint":"https://ai-company-ferd.onrender.com/webhooks/buymeacoffee",
+        "mode":"live_events_only; test events ignored"
+    }
+
+
 @app.get("/api/payments/summary", dependencies=[Depends(require_api_key)])
 def payments_summary(months: int = 12):
     months = max(1, min(months, 24))
