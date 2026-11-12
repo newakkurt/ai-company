@@ -637,7 +637,7 @@ class TaskStore:
                     subscription_id TEXT PRIMARY KEY, supporter_email TEXT,
                     supporter_name TEXT, membership_level_id INTEGER NOT NULL,
                     membership_level_name TEXT, amount REAL NOT NULL, currency TEXT NOT NULL,
-                    status TEXT NOT NULL, current_period_end TEXT, task_id TEXT,
+                    status TEXT NOT NULL, current_period_start TEXT, current_period_end TEXT, task_id TEXT,
                     updated_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -646,6 +646,9 @@ class TaskStore:
                 CREATE INDEX IF NOT EXISTS idx_agent_outputs_task ON agent_outputs(task_id);
                 CREATE INDEX IF NOT EXISTS idx_knowledge_created ON knowledge_notes(created_at);
             """)
+        columns = {row[1] for row in db.execute("PRAGMA table_info(memberships)").fetchall()}
+        if "current_period_start" not in columns:
+            db.execute("ALTER TABLE memberships ADD COLUMN current_period_start TEXT")
 
     def create_task(self, description: str, task_id: str | None = None) -> dict:
         description = description.strip()
@@ -684,17 +687,18 @@ class TaskStore:
 
     def upsert_membership(self, membership: dict):
         fields = ("subscription_id","supporter_email","supporter_name","membership_level_id",
-                  "membership_level_name","amount","currency","status","current_period_end","task_id","updated_at")
+                  "membership_level_name","amount","currency","status","current_period_start","current_period_end","task_id","updated_at")
         values = [membership.get(field) for field in fields]
         with self._connect() as db:
             db.execute(
                 """INSERT INTO memberships (subscription_id,supporter_email,supporter_name,membership_level_id,
-                membership_level_name,amount,currency,status,current_period_end,task_id,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(subscription_id) DO UPDATE SET
+                membership_level_name,amount,currency,status,current_period_start,current_period_end,task_id,updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(subscription_id) DO UPDATE SET
                 supporter_email=excluded.supporter_email,supporter_name=excluded.supporter_name,
                 membership_level_id=excluded.membership_level_id,membership_level_name=excluded.membership_level_name,
                 amount=excluded.amount,currency=excluded.currency,status=excluded.status,
-                current_period_end=excluded.current_period_end,task_id=excluded.task_id,updated_at=excluded.updated_at""",
+                current_period_start=excluded.current_period_start,current_period_end=excluded.current_period_end,
+                task_id=excluded.task_id,updated_at=excluded.updated_at""",
                 values
             )
         return self.get_membership(membership["subscription_id"])
