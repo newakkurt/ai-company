@@ -708,7 +708,7 @@ async def buymeacoffee_webhook(request: Request,
                         notify_owner,
                         f"💳 Ödeme alındı; ürün teslimatı yayın onayını bekliyor.\n"
                         f"Ürün: {release['name']}\nAbonelik: {subscription_id}\n"
-                        "Ürünü yayınladıktan sonra /api/payments/entitlements/{subscription_id}/deliver çağrısını yapın."
+                        f"Ürünü yayınladıktan sonra /api/payments/entitlements/{subscription_id}/deliver çağrısını yapın."
                     )
     else:
         await asyncio.to_thread(
