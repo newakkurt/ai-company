@@ -70,7 +70,7 @@ class SourceVerificationTests(unittest.TestCase):
             FakeResponse(body=b"<html><title>Other company</title><body>Unrelated content</body></html>"),
         )
         result = verify_public_source(
-            "https://public.example.com", "Acme Networks",
+            "https://public-company.com", "Acme Networks",
             resolver=PUBLIC_DNS, connection_factory=factory,
         )
         self.assertEqual(result["source_validation_status"], "reachable_no_match")
