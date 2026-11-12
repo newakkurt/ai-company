@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from company.network_audit import audit_config, detect_vendor, redact_evidence
 
 class NetworkAuditTests(unittest.TestCase):
@@ -106,6 +107,14 @@ interface GigabitEthernet1/0/1
         result=audit_config("unrecognized config")
         self.assertEqual(result.vendor,"unknown")
         self.assertTrue(any("Vendor could not be identified" in x for x in result.notes))
+
+    def test_sanitized_fixtures_are_parseable(self):
+        fixture_dir=Path("fixtures/network_audit")
+        expected={"cisco_sample.cfg":"cisco","huawei_sample.cfg":"huawei","aruba_sample.cfg":"aruba"}
+        for filename,vendor in expected.items():
+            result=audit_config((fixture_dir/filename).read_text(encoding="utf-8"))
+            self.assertEqual(result.vendor,vendor,filename)
+            self.assertTrue(result.findings,filename)
 
     def test_invalid_inputs(self):
         with self.assertRaises(ValueError): audit_config(" ")
