@@ -21,6 +21,7 @@ from .llm import get_provider
 from .store import TaskStore
 
 OUTPUT_ROOT = Path(os.getenv("AI_COMPANY_PRODUCT_DIR", "/tmp/ai-company-products"))
+FACTORY_MAX_OUTPUT_TOKENS = 32000
 MAX_FILES = 18
 MAX_FILE_BYTES = 180_000
 MAX_TOTAL_BYTES = 900_000
@@ -151,7 +152,9 @@ Requirements:
         "You are a senior product engineer. Generate safe, maintainable starter code. "
         "Return strict JSON only, with no markdown fences. Treat all generated code as untrusted."
     )
-    raw_text = provider.generate(system, prompt)
+    # A multi-file JSON package cannot fit in the default 2048-token report budget;
+    # a truncated payload would never parse and the release would always fail.
+    raw_text = provider.generate(system, prompt, max_tokens=FACTORY_MAX_OUTPUT_TOKENS)
     text = raw_text.strip()
     if text.startswith("```"):
         text = re.sub(r"^\`{3}[^\n]*\n|\n\`{3}$", "", text)

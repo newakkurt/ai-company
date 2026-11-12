@@ -7,6 +7,18 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
+DEFAULT_MAX_OUTPUT_TOKENS = 2048   # analysis reports
+GEMINI_MAX_OUTPUT_TOKENS = 65536   # upper bound accepted for Gemini Flash-class models
+GROQ_MAX_OUTPUT_TOKENS = 8000      # conservative cap for llama-3.1-8b-instant
+
+
+def clamp_max_tokens(requested, ceiling: int) -> int:
+    """Return a safe output-token budget: default when unset, never above the provider ceiling."""
+    if requested is None:
+        return min(DEFAULT_MAX_OUTPUT_TOKENS, ceiling)
+    return max(1, min(int(requested), ceiling))
+
+
 class GeminiAPIError(RuntimeError):
     """Safe provider error containing an HTTP status, never an API key."""
 
@@ -17,6 +29,7 @@ class GeminiProvider:
     DEFAULT_MODEL = "gemini-3.5-flash-lite"
     RETRYABLE_STATUS = {429, 500, 502, 503, 504}
     RETRY_DELAYS = (5, 15)
+    MAX_RETRY_AFTER_SECONDS = 90
     supports_search = True
 
     def __init__(self, api_key=None, model=None, timeout=45):
@@ -44,7 +57,8 @@ class GeminiProvider:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return f"\n\nKaynaklar (Google Search grounding, erişim {today}):\n" + "\n".join(lines)
 
-    def generate(self, system_prompt: str, user_prompt: str, use_search: bool = False) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, use_search: bool = False,
+                 max_tokens: int | None = None) -> str:
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not configured")
 
@@ -55,7 +69,7 @@ class GeminiProvider:
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-            "generationConfig": {"maxOutputTokens": 2048},
+            "generationConfig": {"maxOutputTokens": clamp_max_tokens(max_tokens, GEMINI_MAX_OUTPUT_TOKENS)},
         }
         if use_search:
             payload["tools"] = [{"google_search": {}}]
@@ -106,11 +120,14 @@ class GeminiProvider:
                 # requests with blind retries; retry only when Google gives a hint.
                 if status == 429 and retry_after and attempt < 2:
                     try:
-                        delay = min(max(int(retry_after), 1), 900)
+                        delay = max(int(retry_after), 1)
                     except (TypeError, ValueError):
                         delay = 60
-                    time.sleep(delay)
-                    continue
+                    # Long quota waits would outlive the task lease and let another
+                    # worker re-claim the task; fail fast so the Groq fallback can run.
+                    if delay <= self.MAX_RETRY_AFTER_SECONDS:
+                        time.sleep(delay)
+                        continue
                 if status in {500, 502, 503, 504} and attempt < 2:
                     time.sleep(self.RETRY_DELAYS[attempt])
                     continue
@@ -170,7 +187,8 @@ class GroqProvider:
 
     supports_search = False
 
-    def generate(self, system_prompt: str, user_prompt: str, use_search: bool = False) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, use_search: bool = False,
+                 max_tokens: int | None = None) -> str:
         # use_search is accepted for interface parity; Groq has no grounding tool.
         if not self.api_key:
             raise RuntimeError("GROQ_API_KEY is not configured")
@@ -180,7 +198,7 @@ class GroqProvider:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "max_tokens": 2048,
+            "max_tokens": clamp_max_tokens(max_tokens, GROQ_MAX_OUTPUT_TOKENS),
             "temperature": 0.2,
         }
         request = Request(
@@ -222,11 +240,15 @@ class FallbackProvider:
         self.primary = primary
         self.fallback = fallback
 
-    def generate(self, system_prompt: str, user_prompt: str, use_search: bool = False) -> str:
+    def generate(self, system_prompt: str, user_prompt: str, use_search: bool = False,
+                 max_tokens: int | None = None) -> str:
+        # Only forward optional arguments that were actually requested, so providers
+        # that predate them keep working.
+        extra = {"max_tokens": max_tokens} if max_tokens is not None else {}
         try:
             if use_search:
-                return self.primary.generate(system_prompt, user_prompt, use_search=True)
-            return self.primary.generate(system_prompt, user_prompt)
+                return self.primary.generate(system_prompt, user_prompt, use_search=True, **extra)
+            return self.primary.generate(system_prompt, user_prompt, **extra)
         except GeminiAPIError as exc:
             message = str(exc)
             retryable = any(
@@ -255,9 +277,9 @@ class FallbackProvider:
                     "a source-validation checklist and draft templates with placeholders. "
                     "List the exact evidence a human must verify before outreach."
                 )
-                result = self.fallback.generate(safe_system, safe_user)
+                result = self.fallback.generate(safe_system, safe_user, **extra)
                 return "[SEARCH FALLBACK — UNVERIFIED; NO WEB SEARCH WAS PERFORMED]\n" + result
-            return self.fallback.generate(system_prompt, user_prompt)
+            return self.fallback.generate(system_prompt, user_prompt, **extra)
 
 
 def get_provider():

@@ -11,6 +11,10 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "data" / "company.db"
+# A claimed task is considered abandoned after this many quiet minutes. It must
+# comfortably exceed the slowest single LLM call (retries and timeouts included),
+# otherwise a second worker re-claims a task that is still being processed.
+STALE_LEASE_MINUTES = 15
 
 
 def utc_now() -> str:
@@ -124,6 +128,20 @@ class SupabaseTaskStore:
         })
 
     def record_agent_output(self, task_id: str, agent_id: str, output_text: str):
+        """Idempotent per (task, agent): returns False when an output already exists.
+
+        This narrows the race between overlapping workers; a UNIQUE(task_id, agent_id)
+        constraint in the database is still the authoritative guard.
+        """
+        existing = self._request("agent_outputs", params={
+            "select": "output_id", "task_id": f"eq.{task_id}",
+            "agent_id": f"eq.{agent_id}", "limit": "1",
+        })
+        if existing:
+            self._request("assignments", "PATCH", {
+                "task_id": f"eq.{task_id}", "agent_id": f"eq.{agent_id}",
+            }, {"status": "completed"}, "return=minimal")
+            return False
         self._request("agent_outputs", "POST", body={
             "output_id": uuid.uuid4().hex, "task_id": task_id, "agent_id": agent_id,
             "output_text": output_text, "created_at": utc_now(),
@@ -168,7 +186,7 @@ class SupabaseTaskStore:
         self._event(task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
         return task_id
 
-    def requeue_stale_tasks(self, stale_minutes: int = 5):
+    def requeue_stale_tasks(self, stale_minutes: int = STALE_LEASE_MINUTES):
         """Recover interrupted dry-run tasks after a quiet lease window."""
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
         rows = self._request("tasks", params={
@@ -295,6 +313,71 @@ class SupabaseTaskStore:
             row["approval_required"] = bool(row["approval_required"])
         return rows
 
+
+    def create_approval_request(self, action: str, scope: dict, requested_by: str, expires_hours: int = 24):
+        now = datetime.now(timezone.utc)
+        item = {
+            "approval_id": f"approval-{uuid.uuid4().hex}",
+            "action": action,
+            "scope_json": scope or {},
+            "requested_by": requested_by,
+            "status": "pending",
+            "requested_at": now.isoformat(),
+            "expires_at": (now + timedelta(hours=expires_hours)).isoformat(),
+        }
+        self._request("approval_requests", "POST", body=item, prefer="return=minimal")
+        return self.get_approval_request(item["approval_id"])
+
+    def get_approval_request(self, approval_id: str):
+        rows = self._request("approval_requests", params={
+            "select": "*", "approval_id": f"eq.{approval_id}", "limit": "1",
+        })
+        return rows[0] if rows else None
+
+    def list_approval_requests(self, status: str | None = None, limit: int = 100):
+        params = {"select": "*", "order": "requested_at.desc",
+                  "limit": str(max(1, min(limit, 200)))}
+        if status:
+            params["status"] = f"eq.{status}"
+        return self._request("approval_requests", params=params)
+
+    def decide_approval_request(self, approval_id: str, decision: str, actor: str, note: str = ""):
+        if decision not in ("approved", "rejected"):
+            raise ValueError("Decision must be approved or rejected")
+        item = self.get_approval_request(approval_id)
+        if item is None:
+            raise KeyError(f"Approval request not found: {approval_id}")
+        if item["status"] != "pending":
+            raise ValueError(f"Approval request is not pending: {item['status']}")
+        now = utc_now()
+        changed = self._request("approval_requests", "PATCH", {
+            "approval_id": f"eq.{approval_id}", "status": "eq.pending",
+            "expires_at": f"gt.{now}",
+        }, {"status": decision, "decided_at": now, "decided_by": actor,
+            "decision_note": note[:1000]}, "return=representation")
+        if not changed:
+            raise ValueError("Approval request expired or was already decided")
+        return changed[0]
+
+    def consume_approval_request(self, approval_id: str, action: str, scope: dict):
+        item = self.get_approval_request(approval_id)
+        if item is None:
+            raise KeyError(f"Approval request not found: {approval_id}")
+        if item["action"] != action:
+            raise ValueError("Approval action does not match requested action")
+        if (item.get("scope_json") or {}) != (scope or {}):
+            raise ValueError("Approval scope does not match this operation")
+        if item["status"] != "approved":
+            raise ValueError(f"Approval is not usable: {item['status']}")
+        now = utc_now()
+        changed = self._request("approval_requests", "PATCH", {
+            "approval_id": f"eq.{approval_id}", "status": "eq.approved",
+            "expires_at": f"gt.{now}",
+        }, {"status": "consumed", "consumed_at": now}, "return=representation")
+        if not changed:
+            raise ValueError("Approval expired or was already consumed")
+        return changed[0]
+
     def record_approval(self, task_id: str, actor: str, note: str = ""):
         item = self.get_task(task_id)
         if item is None:
@@ -355,6 +438,15 @@ class TaskStore:
                     output_id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(task_id),
                     agent_id TEXT NOT NULL, output_text TEXT NOT NULL, created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS approval_requests (
+                    approval_id TEXT PRIMARY KEY, action TEXT NOT NULL, scope_json TEXT NOT NULL,
+                    requested_by TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(status IN ('pending','approved','rejected','consumed','expired')),
+                    requested_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+                    decided_at TEXT, decided_by TEXT, decision_note TEXT, consumed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_approval_requests_status_created
+                    ON approval_requests(status, requested_at);
                 CREATE TABLE IF NOT EXISTS knowledge_notes (
                     note_id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
                     tags TEXT NOT NULL, created_at TEXT NOT NULL
@@ -465,9 +557,18 @@ class TaskStore:
             return [dict(row) for row in rows]
 
     def record_agent_output(self, task_id: str, agent_id: str, output_text: str):
+        """Idempotent per (task, agent): returns False when an output already exists."""
         with self._connect() as db:
             if db.execute("SELECT 1 FROM tasks WHERE task_id=?", (task_id,)).fetchone() is None:
                 raise KeyError(f"Task not found: {task_id}")
+            if db.execute(
+                "SELECT 1 FROM agent_outputs WHERE task_id=? AND agent_id=?", (task_id, agent_id)
+            ).fetchone():
+                db.execute(
+                    "UPDATE assignments SET status='completed' WHERE task_id=? AND agent_id=?",
+                    (task_id, agent_id)
+                )
+                return False
             now = utc_now()
             db.execute(
                 "INSERT INTO agent_outputs (output_id, task_id, agent_id, output_text, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -515,7 +616,7 @@ class TaskStore:
             self._event(db, task_id, "agent_task_claimed", "worker", {"mode": "analysis_only"})
             return task_id
 
-    def requeue_stale_tasks(self, stale_minutes: int = 60):
+    def requeue_stale_tasks(self, stale_minutes: int = STALE_LEASE_MINUTES):
         """Recover interrupted dry-run tasks after a quiet lease window."""
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
         with self._connect() as db:
@@ -657,6 +758,100 @@ class TaskStore:
                 "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?", (limit,)
             ).fetchall()
             return [dict(row) for row in rows]
+
+
+    def create_approval_request(self, action: str, scope: dict, requested_by: str, expires_hours: int = 24):
+        now = datetime.now(timezone.utc)
+        approval_id = f"approval-{uuid.uuid4().hex}"
+        expires_at = (now + timedelta(hours=expires_hours)).isoformat()
+        with self._connect() as db:
+            db.execute(
+                """INSERT INTO approval_requests
+                   (approval_id, action, scope_json, requested_by, status, requested_at, expires_at)
+                   VALUES (?, ?, ?, ?, 'pending', ?, ?)""",
+                (approval_id, action, json.dumps(scope or {}, ensure_ascii=False),
+                 requested_by, now.isoformat(), expires_at),
+            )
+        return self.get_approval_request(approval_id)
+
+    def get_approval_request(self, approval_id: str):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM approval_requests WHERE approval_id=?", (approval_id,)).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["scope_json"] = json.loads(item["scope_json"])
+        return item
+
+    def list_approval_requests(self, status: str | None = None, limit: int = 100):
+        with self._connect() as db:
+            if status:
+                rows = db.execute(
+                    "SELECT * FROM approval_requests WHERE status=? ORDER BY requested_at DESC LIMIT ?",
+                    (status, max(1, min(limit, 200))),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT * FROM approval_requests ORDER BY requested_at DESC LIMIT ?",
+                    (max(1, min(limit, 200)),),
+                ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["scope_json"] = json.loads(item["scope_json"])
+            items.append(item)
+        return items
+
+    def decide_approval_request(self, approval_id: str, decision: str, actor: str, note: str = ""):
+        if decision not in ("approved", "rejected"):
+            raise ValueError("Decision must be approved or rejected")
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT status, expires_at FROM approval_requests WHERE approval_id=?",
+                (approval_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Approval request not found: {approval_id}")
+            if row["status"] != "pending":
+                raise ValueError(f"Approval request is not pending: {row['status']}")
+            now = datetime.now(timezone.utc)
+            expiry = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+            if expiry <= now:
+                db.execute("UPDATE approval_requests SET status='expired' WHERE approval_id=?", (approval_id,))
+                raise ValueError("Approval request has expired")
+            db.execute(
+                """UPDATE approval_requests SET status=?, decided_at=?, decided_by=?, decision_note=?
+                   WHERE approval_id=? AND status='pending'""",
+                (decision, now.isoformat(), actor, note[:1000], approval_id),
+            )
+        return self.get_approval_request(approval_id)
+
+    def consume_approval_request(self, approval_id: str, action: str, scope: dict):
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM approval_requests WHERE approval_id=?", (approval_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Approval request not found: {approval_id}")
+            item = dict(row)
+            item["scope_json"] = json.loads(item["scope_json"])
+            if item["action"] != action:
+                raise ValueError("Approval action does not match requested action")
+            if item["scope_json"] != (scope or {}):
+                raise ValueError("Approval scope does not match this operation")
+            if item["status"] != "approved":
+                raise ValueError(f"Approval is not usable: {item['status']}")
+            now = datetime.now(timezone.utc)
+            expiry = datetime.fromisoformat(item["expires_at"].replace("Z", "+00:00"))
+            if expiry <= now:
+                db.execute("UPDATE approval_requests SET status='expired' WHERE approval_id=?", (approval_id,))
+                raise ValueError("Approval has expired")
+            changed = db.execute(
+                """UPDATE approval_requests SET status='consumed', consumed_at=?
+                   WHERE approval_id=? AND status='approved'""",
+                (now.isoformat(), approval_id),
+            ).rowcount
+            if not changed:
+                raise ValueError("Approval was already consumed")
+        return self.get_approval_request(approval_id)
 
     def record_approval(self, task_id: str, actor: str, note: str = ""):
         with self._connect() as db:

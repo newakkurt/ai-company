@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
@@ -20,6 +20,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from company.agents import agent_summary, load_agents
+from company.approvals import (
+    ApprovalError, action_requires_approval, consume_action_approval,
+)
 from company.mailbox import mail_status, run_mail_forever
 from company.notifier import (
     notifier_configured,
@@ -150,12 +153,26 @@ class TaskInput(BaseModel):
     description: str = Field(min_length=5, max_length=4000)
 
 
+class ApprovalRequestInput(BaseModel):
+    action: str = Field(min_length=1, max_length=80)
+    scope: dict[str, Any] = Field(default_factory=dict)
+    requested_by: str = Field(default="owner_api", min_length=1, max_length=80)
+    expires_hours: int = Field(default=24, ge=1, le=168)
+
+
+class ApprovalDecisionInput(BaseModel):
+    decision: Literal["approved", "rejected"]
+    note: str = Field(default="", max_length=1000)
+
+
 def require_api_key(authorization: str | None = Header(default=None)) -> None:
     expected = os.getenv("AI_COMPANY_API_KEY", "")
     if not expected:
         raise HTTPException(status_code=503, detail="AI Company API key is not configured on the server")
     supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
-    if not hmac.compare_digest(supplied, expected):
+    # Compare bytes: compare_digest raises TypeError for non-ASCII str, which
+    # would turn a malformed Authorization header into a 500 instead of a 401.
+    if not hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 
@@ -311,6 +328,44 @@ def analysis_status(task_id: str):
         "output_count": len(item.get("agent_outputs", [])),
         "worker": worker_status(),
     }
+
+
+@app.get("/api/approvals", dependencies=[Depends(require_api_key)])
+def list_approvals():
+    return {"approvals": store.list_approval_requests(limit=100)}
+
+
+@app.post("/api/approvals", dependencies=[Depends(require_api_key)])
+def create_approval(payload: ApprovalRequestInput):
+    try:
+        if not action_requires_approval(payload.action):
+            raise HTTPException(status_code=400, detail="This action does not require an approval request.")
+        item = store.create_approval_request(
+            payload.action, payload.scope, payload.requested_by, payload.expires_hours
+        )
+        return item
+    except ApprovalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/approvals/{approval_id}/decision", dependencies=[Depends(require_api_key)])
+def decide_approval(approval_id: str, payload: ApprovalDecisionInput):
+    try:
+        return store.decide_approval_request(
+            approval_id, payload.decision, "owner_api", payload.note
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def require_action_approval(action: str, approval_id: str | None, scope: dict[str, Any] | None = None):
+    """Call immediately before any external side effect (publish, deploy, send, spend, etc.)."""
+    try:
+        return consume_action_approval(store, action, approval_id, scope or {})
+    except ApprovalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _verify_bmc_signature(raw_body: bytes, secret: str, signature: str) -> bool:
