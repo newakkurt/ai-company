@@ -40,6 +40,7 @@ jobs:
               "API": data.get("ok") is True,
               "14 agents": data.get("agents") == 14,
               "Gemini primary configured": provider.get("gemini") is True,
+              "Groq fallback configured": provider.get("groq") is True,
               "AI provider ready": provider.get("ready") is True,
               "Supabase connected": database.get("backend") == "supabase" and database.get("connected") is True and database.get("error") is None,
               "Worker enabled": worker.get("enabled") is True,
