@@ -1,54 +1,49 @@
 # Roadmap and production gates
 
-Status snapshot: 2026-11-12. Items described as "feature branch" are implemented and tested in branches but are not live until the PR stack is merged and the Render service is deployed.
+Status snapshot: 2026-11-12, after integration PRs #28–#36 and Render deployment.
 
-## Implemented / validated in feature branches
+## Live integration status
 
-- [x] 14-role registry, bounded routing and analysis-only task runner.
-- [x] Gemini primary / Groq fallback provider adapter.
-- [x] Idempotent daily/weekly scheduler with bounded work and quota-aware retry delays.
-- [x] Supabase RLS and server-side API gate for hosted state.
-- [x] One-time scoped approval engine with API and Telegram decision support.
-- [x] Durable product release storage, ZIP checksum verification and listing/download API.
-- [x] Product publication requires owner approval bound to product ID + SHA-256.
-- [x] CRM source validation with DNS/IP pinning, redirect revalidation and public HTTPS-only fetching.
-- [x] CRM sales stages and proposal drafts require human verification.
-- [x] Mail auto-reply requires trusted Authentication-Results with DMARC pass and SPF or DKIM pass.
-- [x] Persistent idempotent mail send reservations and daily/sender caps.
-- [x] BMC payment event ledger, product entitlement, revocable download token and transactional email delivery path.
-- [x] Task heartbeat prevents long model calls from being requeued solely because updated_at went stale.
-- [x] Unit tests on Python 3.10, 3.11 and 3.12.
+- [x] Approval engine, quota-aware scheduler, durable product releases, CRM source validation, authenticated mail and secure BMC fulfillment are merged into `main`.
+- [x] Render deployment for the integrated main branch completed successfully.
+- [x] Hosted readiness monitor passed: 14 agents, Supabase connected, embedded worker enabled/running, analysis-only mode.
+- [x] Supabase migrations through `20261112145112_product_download_rpc_security_invoker` are applied (20 migration records).
+- [x] RLS is enabled on approval, product, mail, CRM, membership and payment tables; latest Supabase security advisor returned zero lints.
+- [x] Python 3.10, 3.11 and 3.12 CI passed on the integrated main commit.
+- [x] The Render embedded worker is the active queue consumer. GitHub Actions worker is safely paused because repository Actions secrets are not configured; do not enable both consumers simultaneously.
 
-## Required before calling the company operational
+## Verified production snapshot
 
-1. [ ] Merge the tested PR stack in dependency order and deploy to Render with explicit owner approval.
-2. [ ] Confirm one active worker consumer; configure GitHub Actions secrets or intentionally enable the embedded Render worker, not both by accident.
-3. [ ] Add GitHub Actions secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY`, and at least one of `GEMINI_API_KEY` / `GROQ_API_KEY`.
-4. [ ] Verify Render environment: `AI_COMPANY_API_KEY`, Supabase credentials, model key, Telegram settings and correct public URL.
-5. [ ] Configure each BMC level ID in `BMC_PRODUCT_LEVEL_MAP` with a real published `product_id` and exact USD price.
-6. [ ] Configure a dedicated SMTP mailbox and test transactional delivery; keep auto-reply in draft mode until authentication headers are verified.
-7. [ ] Generate one real product release, inspect its contents, run it in an isolated QA sandbox, approve it, and publish it.
-8. [ ] Run a controlled end-to-end purchase, verify webhook idempotency, email delivery, download expiry/count, cancellation and refund revocation.
-9. [ ] Verify lead sources and manually approve at least one CRM company before any proposal workflow.
-10. [ ] Complete KVKK / ETK / GDPR and tax/accounting review before any outbound campaign or commercial operation.
+- Render service: `https://ai-company-ferd.onrender.com`; latest observed deployment is live.
+- Worker: `enabled=true`, `running=true`, `mode=embedded_supabase_poll`, `analysis_only=true`, `external_actions_enabled=false`.
+- Provider: Gemini key is configured, but historical tasks hit Gemini HTTP 429 / RESOURCE_EXHAUSTED. Groq fallback must be configured and verified before retrying the failed workload.
+- Supabase: 16 CRM companies; all 16 remain `not_checked` for source validation and `new` in the pipeline.
+- Queue: 6 completed tasks, 15 failed tasks, 15 dead-letter records, 83 agent output rows.
+- Commerce: 0 product releases, 0 product entitlements and 0 payment ledger entries. No paid sale or buyer delivery has been proven.
+- Security advisor: no current lints reported.
+
+## Required before autonomous operation
+
+1. [ ] Add a free Groq API key as `GROQ_API_KEY` in Render and confirm `/readyz` reports the Groq fallback as configured. The readiness workflow now treats this fallback as required because Gemini quota exhaustion already stopped the task queue.
+2. [ ] Keep exactly one worker consumer active. Current choice: Render embedded worker. If switching to GitHub Actions, add `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY`, and `GROQ_API_KEY` (plus `GEMINI_API_KEY` if available) as repository Actions secrets, then disable the embedded Render worker in the same controlled change.
+3. [ ] Add an owner-approved recovery process for the 15 quota-failed/dead-letter tasks; do not bulk-retry until Groq fallback is confirmed.
+4. [ ] Verify the 16 existing CRM sources. A successful HTTP fetch is evidence for review, not proof of company identity; a human must approve the source and legal basis before any outreach.
+5. [ ] Generate a product release, inspect the ZIP, run it in an isolated QA environment (network disabled, resource/dependency scan), then approve publication against its exact product ID and SHA-256.
+6. [ ] Configure BMC webhook signing secret and map actual Shop item IDs through `BMC_EXTRA_PRODUCT_MAP` (or membership tiers through `BMC_PRODUCT_LEVEL_MAP`) to published release IDs and exact USD prices.
+7. [ ] Configure dedicated SMTP credentials and test transactional product delivery. Keep inbound auto-replies in draft mode until trusted authentication headers and sender limits are validated.
+8. [ ] Run a controlled end-to-end purchase, webhook retry, download expiry/count, cancellation and refund-revocation test.
+9. [ ] Complete KVKK / ETK / GDPR, consent, suppression, tax, invoice and payout/accounting review before commercial outreach.
 
 ## Remaining engineering work
 
-- [ ] True isolated runtime QA for generated ZIPs (network disabled, resource limits, dependency/security scan).
-- [ ] CRM owner review UI for source evidence, contact legal basis, suppression and follow-up.
-- [ ] Permission-based outreach workflow with one-to-one human approval, bounce/opt-out handling and provider reputation monitoring.
+- [ ] Quota-aware deferred retry / dead-letter recovery UI and safe operator controls.
+- [ ] CRM source-review UI with evidence, contact legal basis, suppression and human approval.
+- [ ] Permission-based one-to-one outreach workflow with bounce/opt-out handling and provider reputation monitoring.
 - [ ] Sales dashboard: qualified leads, proposals, payment events, refunds, entitlements and bank settlements.
 - [ ] Product version upgrade / license lifecycle and buyer self-service.
-- [ ] Durable backup and restore rehearsal for Supabase and artifacts.
+- [ ] Durable backup and restore rehearsal for Supabase and product artifacts.
 - [ ] Production monitoring, dead-letter review UI and alert thresholds.
-- [ ] Invoice, VAT, accounting and payout-to-bank reconciliation process.
+- [ ] True isolated runtime QA and supply-chain/dependency scanning for generated ZIPs.
+- [ ] Invoice, VAT, accounting and payout-to-bank reconciliation.
 
-## Verified current database snapshot
-
-At the last read-only inspection:
-- 16 CRM company records existed; their source-validation status was `not_checked` before the new verifier was deployed.
-- 0 product releases were stored.
-- 0 product entitlements and 0 payment ledger entries were present.
-- No paid customer journey had been proven end-to-end.
-
-These numbers must be refreshed after deployment and live tests. A passing unit test is not proof of a live sale.
+A green unit-test run or HTTP health check is not proof of a live sale. Do not mark the company fully operational until the production gates above are completed with real, owner-approved tests.

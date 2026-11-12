@@ -64,8 +64,8 @@ jobs:
                       problems.append("worker.enabled is not true")
                   if worker.get("running") is not True:
                       problems.append("worker.running is not true")
-                  if provider.get("gemini") is not True:
-                      problems.append("provider.gemini is not true")
+                  if provider.get("groq") is not True:
+                      problems.append("provider.groq fallback is not configured")
                   if not isinstance(provider.get("model"), str) or not provider["model"].strip():
                       problems.append("provider.model is missing")
                   if provider.get("ready") is not True:
@@ -82,6 +82,9 @@ jobs:
                       print(json.dumps({
                           "agents": data["agents"],
                           "provider_model": provider["model"],
+                          "provider_gemini_configured": provider.get("gemini") is True,
+                          "provider_groq_fallback_configured": provider.get("groq") is True,
+                          "provider_fallback_model": provider.get("fallback_model"),
                           "database_backend": database["backend"],
                           "mode": data["mode"],
                           "worker": worker,
