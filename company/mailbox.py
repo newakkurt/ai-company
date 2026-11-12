@@ -17,19 +17,19 @@ Use a DEDICATED support mailbox: handled messages are flagged/marked as seen.
 from __future__ import annotations
 
 import imaplib
+import hashlib
 import os
 import re
 import smtplib
 import ssl
 import threading
-from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from email import message_from_bytes, policy
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr
 
 from .notifier import notify_owner
+from .store import TaskStore
 
 SENSITIVE_RE = re.compile(
     r"refund|iade|chargeback|dispute|itiraz|fatura|invoice|legal|avukat|dava|lawsuit|"
@@ -65,6 +65,7 @@ class MailConfig:
     max_per_sender_per_day: int = 2
     knowledge: str = ""
     allowed_link_prefixes: tuple = ()
+    trusted_auth_servers: tuple = ("mx.google.com",)
 
     @classmethod
     def from_env(cls) -> "MailConfig":
@@ -88,6 +89,11 @@ class MailConfig:
             max_per_sender_per_day=int(os.getenv("MAIL_MAX_REPLIES_PER_SENDER_PER_DAY", "2") or 2),
             knowledge=os.getenv("MAIL_KNOWLEDGE", "").strip(),
             allowed_link_prefixes=prefixes,
+            trusted_auth_servers=tuple(
+                value.strip().lower() for value in os.getenv(
+                    "MAIL_TRUSTED_AUTH_SERVERS", "mx.google.com"
+                ).split(",") if value.strip()
+            ),
         )
 
     @property
@@ -104,40 +110,27 @@ def mail_status() -> dict:
     }
 
 
-class RateLimiter:
-    """In-process daily counters. Resets on restart, so keep the caps conservative."""
+class PersistentRateLimiter:
+    """Persistent idempotency and daily send caps backed by the application database."""
 
-    def __init__(self, max_per_day: int, max_per_sender: int):
-        self.max_per_day = max_per_day
-        self.max_per_sender = max_per_sender
-        self._day = ""
-        self._total = 0
-        self._senders = defaultdict(int)
+    def __init__(self, store, cfg: MailConfig):
+        self.store = store
+        self.cfg = cfg
 
-    def _roll(self):
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if today != self._day:
-            self._day, self._total = today, 0
-            self._senders.clear()
+    def reserve(self, sender: str, message_id: str) -> bool:
+        return self.store.reserve_mail_send(
+            message_id, sender, self.cfg.max_per_day, self.cfg.max_per_sender_per_day
+        )
 
-    def allow(self, sender: str) -> bool:
-        self._roll()
-        return self._total < self.max_per_day and self._senders[sender] < self.max_per_sender
+    def sent(self, message_id: str):
+        self.store.update_mail_send(message_id, "sent")
 
-    def record(self, sender: str):
-        self._roll()
-        self._total += 1
-        self._senders[sender] += 1
+    def failed(self, message_id: str, error_type: str):
+        self.store.update_mail_send(message_id, "failed", error_type)
 
 
-_LIMITER = None
-
-
-def _limiter(cfg: MailConfig) -> RateLimiter:
-    global _LIMITER
-    if _LIMITER is None:
-        _LIMITER = RateLimiter(cfg.max_per_day, cfg.max_per_sender_per_day)
-    return _LIMITER
+def _limiter(cfg: MailConfig, store=None) -> PersistentRateLimiter:
+    return PersistentRateLimiter(store or TaskStore(), cfg)
 
 
 # ---------------------------------------------------------------- parsing / policy
@@ -155,6 +148,7 @@ def parse_message(raw: bytes) -> dict:
         "subject": " ".join(str(msg.get("Subject", "")).split())[:200],
         "message_id": str(msg.get("Message-ID", "")).strip(),
         "references": str(msg.get("References", "")).strip(),
+        "authentication_results": msg.get_all("Authentication-Results", []) or [],
         "body": (body or "").strip()[:MAX_BODY_CHARS],
     }
 
@@ -177,6 +171,22 @@ def classify(parsed: dict, own_addresses: set) -> str:
     if SENSITIVE_RE.search(parsed["subject"] + "\n" + parsed["body"]):
         return "escalate"
     return "reply"
+
+
+def authentication_passed(parsed: dict, cfg: MailConfig) -> bool:
+    """Require the first trusted Authentication-Results header to pass DMARC."""
+    headers = parsed.get("authentication_results") or []
+    if not headers or not cfg.trusted_auth_servers:
+        return False
+    first = str(headers[0]).strip()
+    authserv = first.split(";", 1)[0].strip().lower()
+    if authserv not in {value.lower() for value in cfg.trusted_auth_servers}:
+        return False
+    lower = first.lower()
+    return bool(
+        re.search(r"\bdmarc=pass\b", lower)
+        and (re.search(r"\bspf=pass\b", lower) or re.search(r"\bdkim=pass\b", lower))
+    )
 
 
 def links_allowed(text: str, prefixes: tuple) -> bool:
@@ -241,17 +251,18 @@ def build_reply(cfg: MailConfig, parsed: dict, body: str) -> EmailMessage:
 # ---------------------------------------------------------------- main cycle
 
 def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
-                  notifier=notify_owner, limit: int = 10) -> dict:
+                  notifier=notify_owner, limit: int = 10, store=None) -> dict:
     """Process up to ``limit`` unread, unflagged messages. Returns outcome counters."""
     cfg = cfg or MailConfig.from_env()
     stats = {"checked": 0, "replied": 0, "drafted": 0, "escalated": 0, "skipped": 0}
     if not cfg.configured:
         return {**stats, "status": "not_configured"}
+    store = store or TaskStore()
     if provider is None:
         from .llm import get_provider
         provider = get_provider()
 
-    limiter = _limiter(cfg)
+    limiter = _limiter(cfg, store)
     own = {a.lower() for a in (cfg.user, cfg.from_addr) if a}
     open_smtp = smtp_factory or _default_smtp
     imap = (imap_factory or _default_imap)(cfg)
@@ -265,13 +276,14 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
                 continue
             stats["checked"] += 1
             parsed = parse_message(raw)
+            mail_key = parsed["message_id"] or ("raw-" + hashlib.sha256(raw).hexdigest())
             # Persist inbound classification and enforce the global opt-out list.
             crm_meta = {"do_not_contact": False, "category": "unclassified"}
             try:
                 from .crm import record_mail
                 crm_meta = record_mail(
                     parsed["from"], "inbound", parsed["subject"], parsed["body"],
-                    parsed["message_id"], parsed["references"],
+                    parsed["message_id"], parsed["references"], store=store,
                 )
             except Exception as exc:  # CRM outage must not leak or expose message content
                 print(f"mailbox: CRM logging unavailable; error_type={type(exc).__name__}", flush=True)
@@ -294,6 +306,16 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
                 )
                 continue
 
+            if cfg.mode == "auto_reply" and not authentication_passed(parsed, cfg):
+                imap.store(num, "+FLAGS", "\\Flagged")
+                stats["escalated"] += 1
+                notifier(
+                    "⚠️ Otomatik yanıt güvenlik kontrolünde durduruldu. SPF/DKIM/DMARC doğrulaması "
+                    "gerekli.\n"
+                    f"Kimden: {parsed['from']}\nKonu: {parsed['subject']}"
+                )
+                continue
+
             try:
                 body = draft_reply(provider, cfg, parsed)
             except Exception as exc:  # noqa: BLE001 - leave unread so the next cycle retries
@@ -305,11 +327,10 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
                 problem = "taslak boş veya çok uzun"
             elif not links_allowed(body, cfg.allowed_link_prefixes):
                 problem = "taslak izin listesi dışında bağlantı içeriyor"
-            elif cfg.mode == "auto_reply" and not limiter.allow(parsed["from"]):
-                problem = "günlük cevap limiti doldu"
-
             if cfg.mode == "auto_reply" and not cfg.knowledge:
                 problem = "otomatik yanıt için sahip onaylı bilgi tabanı boş"
+            if cfg.mode == "auto_reply" and not problem and not limiter.reserve(parsed["from"], mail_key):
+                problem = "kalıcı günlük cevap limiti doldu veya bu ileti daha önce işlendi"
             if problem or cfg.mode != "auto_reply":
                 imap.store(num, "+FLAGS", "\\Flagged")
                 stats["escalated" if problem else "drafted"] += 1
@@ -317,7 +338,7 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
                 try:
                     from .crm import record_mail
                     record_mail(parsed["from"], "outbound", parsed["subject"], body,
-                                parsed["message_id"], parsed["references"])
+                                parsed["message_id"], parsed["references"], store=store)
                 except Exception:
                     pass
                 notifier(
@@ -326,15 +347,25 @@ def process_inbox(cfg=None, provider=None, imap_factory=None, smtp_factory=None,
                 )
                 continue
 
-            with open_smtp(cfg) as smtp:
-                smtp.send_message(build_reply(cfg, parsed, body))
+            try:
+                with open_smtp(cfg) as smtp:
+                    smtp.send_message(build_reply(cfg, parsed, body))
+            except Exception as exc:  # Do not retry a possibly accepted SMTP transaction blindly.
+                limiter.failed(mail_key, type(exc).__name__)
+                imap.store(num, "+FLAGS", "\\Flagged")
+                stats["escalated"] += 1
+                notifier(
+                    "⚠️ Otomatik yanıt gönderimi başarısız oldu; yeniden gönderim güvenlik için durduruldu.\n"
+                    f"Kimden: {parsed['from']}\nKonu: {parsed['subject']}\nHata: {type(exc).__name__}"
+                )
+                continue
             try:
                 from .crm import record_mail
                 record_mail(parsed["from"], "outbound", parsed["subject"], body,
-                            parsed["message_id"], parsed["references"])
+                            parsed["message_id"], parsed["references"], store=store)
             except Exception:
                 pass
-            limiter.record(parsed["from"])
+            limiter.sent(mail_key)
             imap.store(num, "+FLAGS", "\\Seen \\Answered")
             stats["replied"] += 1
             notifier(f"📤 Mail otomatik cevaplandı\nKime: {parsed['from']}\nKonu: {parsed['subject']}")
