@@ -18,7 +18,7 @@ For Shop Extras, set `BMC_EXTRA_PRODUCT_MAP` in Render. Keys are the item IDs in
 
 ```json
 {
-  "LEVEL_ID": {
+  "EXTRA_ID": {
     "product_id": "prd-...",
     "product_code": "netcmd_pro",
     "product_name": "NetCmd PRO",
