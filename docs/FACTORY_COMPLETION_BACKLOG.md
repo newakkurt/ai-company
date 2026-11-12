@@ -57,3 +57,12 @@ The first bounded factory implementation is exposed at `/api/factory/*`:
 - The release bundle includes source, README, product spec, sample data, test plan, QA/security report, changelog, manifest, SHA-256 and a backup ZIP copy.
 - Generated source is never executed by the factory; runtime tests remain unverified and every release requires human review.
 - The current Render Free filesystem is ephemeral. Durable release delivery remains gated on persistent object storage being configured.
+
+
+## Zero-budget worker scheduling (2026-11-12)
+
+- Routine work is rotated across the seven days instead of seeding every marketing and research playbook on every day.
+- The normal daily workload is capped at one daily focus plus one weekly workstream; the global prospect scan is an every-other-week addition.
+- Routine tasks use CEO + two specialists. The product factory uses CEO + four specialists.
+- Provider quota exhaustion (HTTP 429 / RESOURCE_EXHAUSTED) is not retried every 30 minutes. It waits at least 24 hours and gets one bounded retry.
+- This reduces unnecessary free-tier requests. It does not create additional provider quota; the Groq fallback still requires its own configured key.

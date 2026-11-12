@@ -49,7 +49,7 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         + _RULES,
     ),
     Playbook(
-        "prospects-global", "daily",
+        "prospects-global", "weekly",
         ("research_intelligence", "marketing_growth", "product_business", "network_infrastructure"),
         "Find up to 10 qualified B2B prospect companies outside Turkey (MSPs, network consultancies, "
         "regional ISPs, enterprise IT teams) that plausibly need multi-vendor network tooling. "
@@ -155,16 +155,57 @@ def slot_id(playbook: Playbook, now: datetime) -> str:
     return f"auto-{playbook.slug}-{local:%Y%m%d}"
 
 
+# Two bounded work items per day: one daily focus and one weekly workstream.
+# The global prospect scan is added every other Monday to avoid doubling daily lead work.
+DAY_PLAN = {
+    0: ("prospects-tr", "digital-product-factory"),
+    1: ("product-opportunities", "weekly-review"),
+    2: ("marketing-linkedin", "marketing-youtube"),
+    3: ("content-draft", "marketing-visual-briefs"),
+    4: ("marketing-seo", "marketing-email"),
+    5: ("marketing-instagram", "marketing-conversion-analysis"),
+    6: ("marketing-telegram", "marketing-growth-opportunities"),
+}
+FACTORY_SPECIALISTS = (
+    "research_intelligence", "product_business", "software_engineer", "qa_testing",
+)
+
+
+def agents_for_playbook(playbook: Playbook) -> list[str]:
+    """Keep routine tasks to CEO + two specialists; factory gets four specialists."""
+    if playbook.slug == "digital-product-factory":
+        specialists = list(FACTORY_SPECIALISTS)
+    else:
+        specialists = list(playbook.agents[:2])
+    return ["ceo", *specialists]
+
+
+def _is_quota_failure(task: dict) -> bool:
+    """Do not hammer an exhausted provider with the ordinary 30-minute retry loop."""
+    for event in reversed(task.get("events") or []):
+        if event.get("event_type") != "agent_task_failed":
+            continue
+        details = event.get("details") or {}
+        summary = str(details.get("error_summary") or "").upper()
+        return "HTTP 429" in summary or "RESOURCE_EXHAUSTED" in summary or "QUOTA" in summary
+    return False
+
+
 def due_playbooks(now: datetime | None = None) -> list[tuple[str, Playbook]]:
     now = now or datetime.now(timezone.utc)
-    if now.astimezone(TR_TZ).hour < DAILY_START_HOUR:
+    local = now.astimezone(TR_TZ)
+    if local.hour < DAILY_START_HOUR:
         return []
     known = {a.id for a in load_agents()}
+    by_slug = {playbook.slug: playbook for playbook in PLAYBOOKS}
     for playbook in PLAYBOOKS:
         unknown = set(playbook.agents) - known
         if unknown:
             raise ValueError(f"Playbook {playbook.slug} references unknown agents: {sorted(unknown)}")
-    return [(slot_id(p, now), p) for p in PLAYBOOKS]
+    selected = list(DAY_PLAN[local.weekday()])
+    if local.weekday() == 0 and local.isocalendar().week % 2 == 0:
+        selected.append("prospects-global")
+    return [(slot_id(by_slug[slug], now), by_slug[slug]) for slug in selected]
 
 
 def seed_due_tasks(store, now: datetime | None = None) -> list[str]:
@@ -176,15 +217,22 @@ def seed_due_tasks(store, now: datetime | None = None) -> list[str]:
         existing = store.get_task(task_id)
         if existing is None:
             store.create_task(playbook.description, task_id=task_id)
-            store.assign_agents(task_id, ["ceo", *playbook.agents])
+            store.assign_agents(task_id, agents_for_playbook(playbook))
             created.append(task_id)
         elif existing["status"] == "failed":
             # Bounded: at most 2 retries, spaced 30 min apart, resumes from saved outputs.
-            requeued = store.requeue_failed_task(task_id, max_retries=2, min_age_minutes=30)
+            quota_failure = _is_quota_failure(existing)
+            retry_limit = 1 if quota_failure else 2
+            retry_delay = 1440 if quota_failure else 30
+            requeued = store.requeue_failed_task(
+                task_id, max_retries=retry_limit, min_age_minutes=retry_delay
+            )
             if not requeued:
-                # Once the retry budget is exhausted, preserve the complete task
-                # snapshot for inspection instead of retrying forever.
-                archive_if_exhausted(store, task_id, max_retries=2, min_age_minutes=30)
+                # Preserve the full task snapshot; quota failures wait a full day
+                # before one retry rather than repeatedly consuming exhausted quota.
+                archive_if_exhausted(
+                    store, task_id, max_retries=retry_limit, min_age_minutes=retry_delay
+                )
     if created:
         print(f"scheduler: seeded {len(created)} task(s): {', '.join(created)}", flush=True)
     return created

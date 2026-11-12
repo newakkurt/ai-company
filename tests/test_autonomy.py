@@ -56,25 +56,38 @@ class SchedulerTests(unittest.TestCase):
         early = datetime(2026, 11, 12, 5, 49, tzinfo=TR)
         self.assertEqual(scheduler.seed_due_tasks(self.store, now=early), [])
 
-    def test_seeding_is_idempotent_and_assigns_ceo_plus_specialists(self):
-        now = datetime(2026, 11, 12, 8, 0, tzinfo=TR)
+    def test_seeding_is_idempotent_and_assigns_bounded_specialists(self):
+        now = datetime(2026, 11, 16, 8, 0, tzinfo=TR)  # odd ISO week: no extra global scan
         first = scheduler.seed_due_tasks(self.store, now=now)
         second = scheduler.seed_due_tasks(self.store, now=now)
-        self.assertEqual(len(first), len(scheduler.PLAYBOOKS))
+        self.assertEqual(len(first), 2)
         self.assertEqual(second, [])
-        task = self.store.get_task("auto-prospects-tr-20261112")
+        task = self.store.get_task("auto-prospects-tr-20261116")
         self.assertEqual(task["execution_mode"], "dry_run")
         agents = {a["agent_id"] for a in task["assignments"]}
+        self.assertEqual(len(agents), 3)
         self.assertIn("ceo", agents)
         self.assertIn("research_intelligence", agents)
 
-    def test_new_day_creates_new_daily_tasks_and_weekly_once_per_week(self):
-        monday = datetime(2026, 11, 9, 8, 0, tzinfo=TR)
+    def test_new_day_creates_rotating_daily_and_weekly_work(self):
+        monday = datetime(2026, 11, 16, 8, 0, tzinfo=TR)
         scheduler.seed_due_tasks(self.store, now=monday)
         tuesday = monday + timedelta(days=1)
         created = scheduler.seed_due_tasks(self.store, now=tuesday)
-        self.assertNotIn("auto-weekly-review-2026w46", created)
-        self.assertIn("auto-prospects-tr-20261110", created)
+        self.assertNotIn("auto-digital-product-factory-2026w47", created)
+        self.assertIn("auto-product-opportunities-20261117", created)
+        self.assertIn("auto-weekly-review-2026w47", created)
+
+    def test_weekly_rotation_covers_all_workstreams_without_daily_flood(self):
+        monday = datetime(2026, 11, 16, 8, 0, tzinfo=TR)
+        slugs = []
+        for offset in range(7):
+            due = scheduler.due_playbooks(monday + timedelta(days=offset))
+            self.assertEqual(len(due), 2)
+            slugs.extend(playbook.slug for _, playbook in due)
+        self.assertEqual(len(set(slugs)), 14)
+        self.assertIn("digital-product-factory", slugs)
+        self.assertIn("marketing-youtube", slugs)
 
     def test_disabled_flag_stops_seeding(self):
         with patch.dict(os.environ, {"AI_COMPANY_AUTO_TASKS": "false"}):
@@ -83,9 +96,9 @@ class SchedulerTests(unittest.TestCase):
             )
 
     def test_failed_task_retry_is_bounded_and_spaced(self):
-        now = datetime(2026, 11, 12, 8, 0, tzinfo=TR)
+        now = datetime(2026, 11, 16, 8, 0, tzinfo=TR)
         scheduler.seed_due_tasks(self.store, now=now)
-        task_id = "auto-prospects-tr-20261112"
+        task_id = "auto-prospects-tr-20261116"
 
         def fail_and_age():
             self.assertEqual(self.store.claim_next_task() is not None, True)
@@ -102,6 +115,20 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(self.store.requeue_failed_task(task_id, max_retries=2, min_age_minutes=30))
         fail_and_age()
         self.assertFalse(self.store.requeue_failed_task(task_id, max_retries=2, min_age_minutes=30))
+        self.assertEqual(self.store.get_task(task_id)["status"], "failed")
+
+    def test_quota_failure_waits_24_hours_before_retry(self):
+        now = datetime(2026, 11, 16, 8, 0, tzinfo=TR)
+        scheduler.seed_due_tasks(self.store, now=now)
+        task_id = "auto-prospects-tr-20261116"
+        self.assertEqual(self.store.claim_next_task(), task_id)
+        self.store.fail_task(task_id, "GeminiAPIError", "Gemini API returned HTTP 429 RESOURCE_EXHAUSTED")
+        with self.store._connect() as db:
+            db.execute(
+                "UPDATE tasks SET updated_at=? WHERE task_id=?",
+                ((now - timedelta(hours=1)).isoformat(), task_id),
+            )
+        scheduler.seed_due_tasks(self.store, now=now + timedelta(hours=1))
         self.assertEqual(self.store.get_task(task_id)["status"], "failed")
 
     def test_recent_failure_is_not_retried_immediately(self):
