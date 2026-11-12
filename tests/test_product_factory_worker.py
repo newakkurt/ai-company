@@ -23,6 +23,10 @@ class FactoryWorkerTests(unittest.TestCase):
             def record_agent_output(self, _task_id, agent_id, output):
                 self.saved = (agent_id, output)
 
+            def save_product_release(self, release, artifact):
+                self.release_saved = (release["product_id"], artifact)
+                return {"product_id": release["product_id"]}
+
             def complete_task(self, _task_id, output_count):
                 self.completed = output_count
 
@@ -31,15 +35,18 @@ class FactoryWorkerTests(unittest.TestCase):
 
         store = FakeStore()
         specialist_results = [{"agent_id": "product_business", "output": "Pain evidence"}]
-        release = {"product_id": "prd-012345abcdef", "release_status": "review_required"}
+        release = {"product_id": "prd-012345abcdef", "release_status": "review_required",
+                   "download_path": "/tmp/release.zip"}
         with patch("company.worker.run_task", return_value=specialist_results):
             with patch("company.worker.build_product", return_value=release) as build:
                 with patch("company.worker._safe_notify"):
-                    result = process_one_task(store=store, provider=object())
+                    with patch("builtins.open", unittest.mock.mock_open(read_data=b"fake-zip")):
+                        result = process_one_task(store=store, provider=object())
 
         build.assert_called_once()
         self.assertEqual(result["status"], "completed")
         self.assertEqual(store.saved[0], "product_factory")
+        self.assertEqual(store.release_saved, ("prd-012345abcdef", b"fake-zip"))
         self.assertEqual(json.loads(store.saved[1].split("):\n", 1)[-1]), release)
         self.assertEqual(store.completed, 2)
 
