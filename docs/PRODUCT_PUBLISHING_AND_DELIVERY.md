@@ -12,9 +12,9 @@ Generated product releases remain `review_required`. They are not purchasable or
 
 The approval is one-time and bound to that exact artifact checksum.
 
-## Map Buy Me a Coffee levels
+## Map Buy Me a Coffee Shop items
 
-Set `BMC_PRODUCT_LEVEL_MAP` in the Render service environment to a JSON object mapping each BMC membership level ID to its published product release and price:
+For Shop Extras, set `BMC_EXTRA_PRODUCT_MAP` in Render. Keys are the item IDs in the webhook's `data.extras[].id`; values map each shop item to a published release and exact USD unit price:
 
 ```json
 {
@@ -27,11 +27,11 @@ Set `BMC_PRODUCT_LEVEL_MAP` in the Render service environment to a JSON object m
 }
 ```
 
-Also configure `BMC_WEBHOOK_SECRET` and `APP_PUBLIC_URL`. The legacy `BMC_PRO_MEMBERSHIP_LEVEL_ID` / `BMC_PRO_PRODUCT_ID` pair remains supported for one product.
+Also configure `BMC_WEBHOOK_SECRET` and `APP_PUBLIC_URL`. `BMC_PRODUCT_LEVEL_MAP` remains available only for membership-tier sales; it is not the Shop Extras map.
 
 ## Delivery behavior
 
-- A verified live BMC membership event is recorded in the payment ledger.
+- A verified live `extra_purchase.created` event is mapped by each `extras[].id` and recorded in the payment ledger. Membership events remain supported separately.
 - A payment creates an entitlement as long as the mapped product release exists. If the release is not yet published, the entitlement remains pending rather than being lost.
 - Only a product with status `approved_for_sale` receives a download token.
 - After publishing a previously pending release, the owner can call `POST /api/payments/entitlements/{subscription_id}/deliver` to finish delivery.
