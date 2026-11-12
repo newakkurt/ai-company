@@ -15,40 +15,40 @@ class Rule:
 
 RULES = {
 "cisco": [
-Rule("CIS-001","SSH v2 enabled","high",r"(?im)^\\s*ip ssh version 2\\s*$","Enable SSH version 2 and disable legacy remote management."),
-Rule("CIS-002","AAA configured","high",r"(?im)^\\s*aaa new-model\\s*$","Configure AAA and validate the intended authentication method."),
-Rule("CIS-003","NTP server configured","medium",r"(?im)^\\s*ntp server\\s+\\S+","Configure at least one approved NTP server."),
-Rule("CIS-004","Syslog destination configured","medium",r"(?im)^\\s*logging host\\s+\\S+","Forward logs to an approved central syslog collector."),
-Rule("CIS-005","SNMPv3 user or group configured","high",r"(?im)^\\s*snmp-server\\s+(?:group\\s+\\S+\\s+v3|user\\s+\\S+\\s+\\S+\\s+v3)\\b","Use SNMPv3 with authentication and privacy; remove weak community strings."),
-Rule("CIS-006","HTTP management disabled","high",r"(?im)^\\s*no\\s+ip\\s+http\\s+server\\s*$|^\\s*no\\s+ip\\s+http\\s+secure-server\\s*$","Disable plaintext HTTP management; use secured management access."),
-Rule("CIS-007","BPDU Guard configured","high",r"(?im)^\\s*spanning-tree\\s+portfast\\s+bpduguard\\s+default\\s*$","Enable BPDU Guard on eligible edge ports after checking topology."),
-Rule("CIS-008","DHCP snooping configured","high",r"(?im)^\\s*ip\\s+dhcp\\s+snooping\\s*$","Enable DHCP snooping on intended VLANs and mark trusted uplinks carefully."),
-Rule("CIS-009","Port security configured","medium",r"(?im)^\\s*switchport\\s+port-security\\s*$","Apply port security to eligible access interfaces with a deliberate violation action."),
-Rule("CIS-010","Trunk VLAN allow-list configured","medium",r"(?im)^\\s*switchport\\s+trunk\\s+allowed\\s+vlan\\s+","Restrict each trunk to the VLANs it actually needs."),
+Rule("CIS-001","SSH v2 enabled","high",r"(?im)^\s*ip ssh version 2\s*$","Enable SSH version 2 and disable legacy remote management."),
+Rule("CIS-002","AAA configured","high",r"(?im)^\s*aaa new-model\s*$","Configure AAA and validate the intended authentication method."),
+Rule("CIS-003","NTP server configured","medium",r"(?im)^\s*ntp server\s+\S+","Configure at least one approved NTP server."),
+Rule("CIS-004","Syslog destination configured","medium",r"(?im)^\s*logging host\s+\S+","Forward logs to an approved central syslog collector."),
+Rule("CIS-005","SNMPv3 user or group configured","high",r"(?im)^\s*snmp-server\s+(?:group\s+\S+\s+v3|user\s+\S+\s+\S+\s+v3)\b","Use SNMPv3 with authentication and privacy; remove weak community strings."),
+Rule("CIS-006","HTTP management disabled","high",r"(?im)^\s*no\s+ip\s+http\s+server\s*$|^\s*no\s+ip\s+http\s+secure-server\s*$","Disable plaintext HTTP management; use secured management access."),
+Rule("CIS-007","BPDU Guard configured","high",r"(?im)^\s*spanning-tree\s+portfast\s+bpduguard\s+default\s*$","Enable BPDU Guard on eligible edge ports after checking topology."),
+Rule("CIS-008","DHCP snooping configured","high",r"(?im)^\s*ip\s+dhcp\s+snooping\s*$","Enable DHCP snooping on intended VLANs and mark trusted uplinks carefully."),
+Rule("CIS-009","Port security configured","medium",r"(?im)^\s*switchport\s+port-security\s*$","Apply port security to eligible access interfaces with a deliberate violation action."),
+Rule("CIS-010","Trunk VLAN allow-list configured","medium",r"(?im)^\s*switchport\s+trunk\s+allowed\s+vlan\s+","Restrict each trunk to the VLANs it actually needs."),
 ],
 "huawei": [
-Rule("HUA-001","SSH/STelnet enabled","high",r"(?im)^\\s*stelnet\\s+server\\s+enable\\s*$","Enable secure STelnet only where required and restrict management sources."),
-Rule("HUA-002","AAA local-user or domain configured","high",r"(?im)^\\s*(?:local-user\\s+\\S+|domain\\s+\\S+)\\b","Review AAA domains and local accounts; remove unused privileged accounts."),
-Rule("HUA-003","NTP server configured","medium",r"(?im)^\\s*ntp-service\\s+unicast-server\\s+\\S+","Configure an approved NTP unicast server."),
-Rule("HUA-004","Log host configured","medium",r"(?im)^\\s*info-center\\s+loghost\\s+\\S+","Forward logs to an approved central log host."),
-Rule("HUA-005","SNMPv3 user configured","high",r"(?im)^\\s*snmp-agent\\s+usm-user\\s+v3\\s+\\S+","Use SNMPv3 authentication and privacy; remove legacy communities."),
-Rule("HUA-006","HTTP management disabled","high",r"(?im)^\\s*undo\\s+http\\s+server\\s+enable\\s*$","Disable the HTTP server; retain only approved secure management."),
-Rule("HUA-007","STP BPDU protection configured","high",r"(?im)^\\s*stp\\s+bpdu-protection\\s+enable\\s*$","Enable BPDU protection on edge ports after validating topology."),
-Rule("HUA-008","DHCP snooping configured","high",r"(?im)^\\s*dhcp\\s+snooping\\s+enable\\s*$","Enable DHCP snooping on intended VLANs and trust only uplinks."),
-Rule("HUA-009","Port security configured","medium",r"(?im)^\\s*port-security\\s+enable\\s*$","Apply port security on eligible access interfaces."),
-Rule("HUA-010","Trunk VLAN allow-list configured","medium",r"(?im)^\\s*port\\s+trunk\\s+allow-pass\\s+vlan\\s+","Restrict trunk VLANs to the required set."),
+Rule("HUA-001","SSH/STelnet enabled","high",r"(?im)^\s*stelnet\s+server\s+enable\s*$","Enable secure STelnet only where required and restrict management sources."),
+Rule("HUA-002","AAA local-user or domain configured","high",r"(?im)^\s*(?:local-user\s+\S+|domain\s+\S+)\b","Review AAA domains and local accounts; remove unused privileged accounts."),
+Rule("HUA-003","NTP server configured","medium",r"(?im)^\s*ntp-service\s+unicast-server\s+\S+","Configure an approved NTP unicast server."),
+Rule("HUA-004","Log host configured","medium",r"(?im)^\s*info-center\s+loghost\s+\S+","Forward logs to an approved central log host."),
+Rule("HUA-005","SNMPv3 user configured","high",r"(?im)^\s*snmp-agent\s+usm-user\s+v3\s+\S+","Use SNMPv3 authentication and privacy; remove legacy communities."),
+Rule("HUA-006","HTTP management disabled","high",r"(?im)^\s*undo\s+http\s+server\s+enable\s*$","Disable the HTTP server; retain only approved secure management."),
+Rule("HUA-007","STP BPDU protection configured","high",r"(?im)^\s*stp\s+bpdu-protection\s+enable\s*$","Enable BPDU protection on edge ports after validating topology."),
+Rule("HUA-008","DHCP snooping configured","high",r"(?im)^\s*dhcp\s+snooping\s+enable\s*$","Enable DHCP snooping on intended VLANs and trust only uplinks."),
+Rule("HUA-009","Port security configured","medium",r"(?im)^\s*port-security\s+enable\s*$","Apply port security on eligible access interfaces."),
+Rule("HUA-010","Trunk VLAN allow-list configured","medium",r"(?im)^\s*port\s+trunk\s+allow-pass\s+vlan\s+","Restrict trunk VLANs to the required set."),
 ],
 "aruba": [
-Rule("ARB-001","SSH enabled","high",r"(?im)^\\s*ip\\s+ssh\\s*$","Enable SSH and restrict management access; disable insecure management."),
-Rule("ARB-002","AAA authentication configured","high",r"(?im)^\\s*(?:aaa\\s+authentication|radius-server\\s+host|tacacs-server\\s+host)\\b","Configure and validate the intended AAA/RADIUS/TACACS authentication path."),
-Rule("ARB-003","NTP server configured","medium",r"(?im)^\\s*sntp\\s+unicast\\s+\\S+","Configure an approved SNTP server."),
-Rule("ARB-004","Syslog server configured","medium",r"(?im)^\\s*logging\\s+\\S+","Forward logs to an approved central syslog collector."),
-Rule("ARB-005","SNMPv3 configured","high",r"(?im)^\\s*snmpv3\\s+(?:user|group)\\s+\\S+","Use SNMPv3 with authentication and privacy."),
-Rule("ARB-006","Plaintext web management disabled","high",r"(?im)^\\s*no\\s+web-management\\s*$","Disable plaintext web management; use approved secure management."),
-Rule("ARB-007","BPDU protection configured","high",r"(?im)^\\s*spanning-tree\\s+bpdu-protection\\s*$","Enable BPDU protection on eligible edge ports."),
-Rule("ARB-008","DHCP snooping configured","high",r"(?im)^\\s*dhcp-snooping\\s*$","Enable DHCP snooping and trust only intended uplinks."),
-Rule("ARB-009","Port security configured","medium",r"(?im)^\\s*port-security\\s*$","Apply port security to eligible access interfaces."),
-Rule("ARB-010","Trunk VLAN allow-list configured","medium",r"(?im)^\\s*(?:tagged|trunk)\\s+\\S+","Review tagged VLAN membership and remove unnecessary VLANs."),
+Rule("ARB-001","SSH enabled","high",r"(?im)^\s*ip\s+ssh\s*$","Enable SSH and restrict management access; disable insecure management."),
+Rule("ARB-002","AAA authentication configured","high",r"(?im)^\s*(?:aaa\s+authentication|radius-server\s+host|tacacs-server\s+host)\b","Configure and validate the intended AAA/RADIUS/TACACS authentication path."),
+Rule("ARB-003","NTP server configured","medium",r"(?im)^\s*sntp\s+unicast\s+\S+","Configure an approved SNTP server."),
+Rule("ARB-004","Syslog server configured","medium",r"(?im)^\s*logging\s+\S+","Forward logs to an approved central syslog collector."),
+Rule("ARB-005","SNMPv3 configured","high",r"(?im)^\s*snmpv3\s+(?:user|group)\s+\S+","Use SNMPv3 with authentication and privacy."),
+Rule("ARB-006","Plaintext web management disabled","high",r"(?im)^\s*no\s+web-management\s*$","Disable plaintext web management; use approved secure management."),
+Rule("ARB-007","BPDU protection configured","high",r"(?im)^\s*spanning-tree\s+bpdu-protection\s*$","Enable BPDU protection on eligible edge ports."),
+Rule("ARB-008","DHCP snooping configured","high",r"(?im)^\s*dhcp-snooping\s*$","Enable DHCP snooping and trust only intended uplinks."),
+Rule("ARB-009","Port security configured","medium",r"(?im)^\s*port-security\s*$","Apply port security to eligible access interfaces."),
+Rule("ARB-010","Trunk VLAN allow-list configured","medium",r"(?im)^\s*(?:tagged|trunk)\s+\S+","Review tagged VLAN membership and remove unnecessary VLANs."),
 ]}
 
 def detect_vendor(config: str) -> str:
@@ -72,7 +72,7 @@ def render_markdown(report: dict) -> str:
     lines=[f"# {report['product']} — Audit Report","",f"- Version: {report['version']}",f"- Vendor: {report['vendor']}",f"- Mode: {report['mode']}",f"- Checks: {report['summary']['checks']} | Pass: {report['summary']['passed']} | Review: {report['summary']['review']}","","| ID | Check | Severity | Result |","|---|---|---|---|"]
     lines += [f"| {x['id']} | {x['title']} | {x['severity']} | {x['status'].upper()} |" for x in report['checks']]
     lines += ["","## Remediation"]+[f"- **{x['id']} — {x['title']}:** {x['remediation']}" for x in report['checks'] if x['status']=="review"]+["","## Limitations"]+[f"- {x}" for x in report['limitations']]
-    return "\\n".join(lines)+"\\n"
+    return "\n".join(lines)+"\n"
 
 def main(argv: Iterable[str] | None=None) -> int:
     parser=argparse.ArgumentParser(description="Offline read-only Cisco/Huawei/Aruba config baseline auditor")
