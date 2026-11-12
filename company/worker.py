@@ -82,7 +82,7 @@ def process_one_task(store=None, provider=None):
         if task_id.startswith(("auto-prospects-", "crm-research-")):
             for item in results:
                 output = item.get("output", "")
-                match = re.search(r"CRM_LEADS_JSON\\s*[:=]\\s*(\\[.*?\\])", output, re.I | re.S)
+                match = re.search(r"CRM_LEADS_JSON\s*[:=]\s*(\[.*?\])", output, re.I | re.S)
                 if not match:
                     continue
                 try:
@@ -102,7 +102,11 @@ def process_one_task(store=None, provider=None):
                     if len(str(lead.get("source_name", "")).strip()) < 2:
                         continue
                     lead["source_type"] = "agent_research_unverified"
-                    crm_upsert_company(lead, store=store)
+                    try:
+                        crm_upsert_company(lead, store=store)
+                    except Exception as crm_exc:
+                        print("crm: prospect ingest skipped; error_type=" +
+                              type(crm_exc).__name__, file=sys.stderr, flush=True)
         if task_id.startswith("auto-digital-product-factory-"):
             research_context = "\n\n".join(
                 f"[{item['agent_id']}]\n{item['output']}" for item in results

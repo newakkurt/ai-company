@@ -137,3 +137,18 @@ Tüm uçlar `Authorization: Bearer <AI_COMPANY_API_KEY>` gerektirir. Örnek:
 ```
 
 **Güvenlik ve teslimat notları:** Üretilen kaynak kod hiçbir zaman worker içinde çalıştırılmaz. Dosya yolu/uzantısı/boyutu ve gömülü sırlar doğrulanır; Python sözdizimi AST ile kontrol edilir; riskli kalıplar uyarı üretir. Bunlar tam runtime testi veya güvenlik sertifikası değildir. Her sürüm için SHA-256 ve yerel yedek ZIP oluşturulur. Render Free dosya sistemi geçicidir; ZIP'i kalıcı müşteri teslimi olarak kullanmadan önce kalıcı object storage/harici release deposu bağlanmalıdır. Ürünler varsayılan olarak `review_required` durumundadır.
+
+
+## Müşteri bulma ve CRM
+
+CRM ekranı: `/crm` (API anahtarı gerekir). Özellikler:
+- Türkiye ve global prospect araştırması için ajan görevi oluşturma; günlük prospect playbook çıktıları JSON bloklarından CRM'e alınır.
+- Şirketleri ülke + normalize şirket adı ile tekilleştirme; kamuya açık kaynak URL'si, kaynak adı, sektör, ihtiyaç ve uyum gerekçesi kaydı.
+- 0–100 açıklanabilir müşteri uygunluk puanı; şirket/kişi kaynak kayıtları.
+- Kişi kaydı, satış aşamaları, teklif taslağı ve takip tarihi.
+- Gelen kutusu mesaj sınıflandırma kaydı; hassas konular insan incelemesine ayrılır.
+- Merkezi unsubscribe/do-not-contact listesi; gelen ret isteği gelecekteki iletişimi engeller.
+- E-posta cevapları yalnızca `MAIL_KNOWLEDGE` içindeki sahip-onaylı bilgilerle hazırlanır. Bilgi tabanı boşsa otomatik yanıt gönderimi engellenir.
+- CRM prospect teklifleri yalnızca taslak olarak oluşturulur. Soğuk e-posta gönderimi kapalıdır; insan onayı ve geçerli iletişim izni/hukuki dayanak olmadan gönderim yapılmaz.
+
+CRM tabloları Supabase'te RLS + mevcut özel `app.ai_company_authorized` gate ile korunur. Kişisel veri yerine mümkün olduğunca şirketin yayımladığı genel iletişim kanalları kullanılmalıdır. Türkiye'de ticari elektronik ileti ve İYS yükümlülükleri, GDPR/KVKK ve veri saklama süreleri şirket tarafından doğrulanmalıdır. Sistem hukuki dayanak veya rıza varlığını kendiliğinden varsaymaz.

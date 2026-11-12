@@ -13,7 +13,7 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 def norm_name(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+    return re.sub(r"[^a-z0-9]+", " ", value.casefold().translate(str.maketrans({"ı":"i","ş":"s","ğ":"g","ü":"u","ö":"o","ç":"c"}))).strip()
 
 def norm_email(value: str) -> str:
     return value.strip().casefold()
@@ -26,7 +26,7 @@ def score_company(data: dict) -> dict:
     signals = {
         "need_fit": 25 if data.get("need_summary") else 0,
         "industry_fit": 15 if data.get("industry") else 0,
-        "source_quality": 15 if data.get("source_url") and data.get("source_name") else 0,
+        "source_quality": 15 if data.get("source_url") and data.get("source_name") and data.get("source_type") != "agent_research_unverified" else 0,
         "contactability": 15 if data.get("public_contact_channel") or data.get("business_email") else 0,
         "website": 10 if data.get("website") else 0,
         "country_fit": 10 if data.get("country") and data.get("country") != "Unknown" else 0,
@@ -43,14 +43,19 @@ def upsert_company(data: dict, store=None) -> dict:
     if urlparse(source_url).scheme != "https" or not urlparse(source_url).netloc:
         raise ValueError("A public HTTPS source URL is required")
     normalized = norm_name(name)
+    website = (data.get("website") or "").strip().rstrip("/").lower() or None
     score = score_company(data)
     existing = db._request("crm_companies", params={
         "select":"*", "normalized_name":f"eq.{normalized}", "country":f"eq.{country}", "limit":"1"
     })
+    if not existing and website:
+        existing = db._request("crm_companies", params={
+            "select":"*", "website":f"eq.{website}", "limit":"1"
+        })
     company_id = existing[0]["company_id"] if existing else "co-" + uuid.uuid4().hex[:12]
     row = {
         "company_id":company_id, "company_name":name, "normalized_name":normalized,
-        "country":country, "website":data.get("website"), "industry":data.get("industry"),
+        "country":country, "website":website, "industry":data.get("industry"),
         "company_size":data.get("company_size"), "source_name":data.get("source_name") or "unknown",
         "source_url":source_url,
         "source_type":data.get("source_type") or "public_web",
