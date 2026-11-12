@@ -19,7 +19,13 @@
 ## Phase 2 — Safe integrations
 - [x] Telegram allowlisted task intake (local task creation only)
 - [ ] GitHub read-only project inspection adapter
-- [ ] Durable hosted worker with leases, retries, idempotency and dead-letter handling
+- [x] Autonomous daily/weekly task scheduler (idempotent; see docs/AUTONOMY_SETUP.md)
+- [x] Owner Telegram notifications: verified sales, unexpected payment events, cancellations, daily reports, failures
+- [x] Research roles use grounded web search with cited sources
+- [x] Inbound-mail triage with draft-first mode, escalation of sensitive topics and guarded opt-in auto-reply
+- [x] Bounded automatic retry of failed tasks
+- [ ] Durable hosted worker with leases and dead-letter handling (lease + bounded retry done; dead-letter queue open)
+- [ ] Structured CRM / prospect store with dedupe, source evidence and opt-out handling
 - [ ] Isolated adapters for the user's existing projects
 - [ ] QA report and release evidence workflow
 - [ ] Optional Obsidian-compatible Markdown export

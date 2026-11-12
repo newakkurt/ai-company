@@ -77,13 +77,28 @@ class TelegramIntake:
         }
         return sorted(ids)
 
-    def poll_forever(self):
+    def _wait(self, stop_event, seconds):
+        if stop_event is not None:
+            stop_event.wait(seconds)
+        else:
+            time.sleep(seconds)
+
+    def poll_forever(self, stop_event=None):
+        """Long-poll until stop_event is set. Network errors back off instead of killing the loop."""
         offset = None
-        while True:
+        backoff = 5
+        while stop_event is None or not stop_event.is_set():
             payload = {"timeout": 25, "allowed_updates": json.dumps(["message"])}
             if offset is not None:
                 payload["offset"] = offset
-            updates = self._api("getUpdates", payload, timeout=35)
+            try:
+                updates = self._api("getUpdates", payload, timeout=35)
+                backoff = 5
+            except Exception as exc:  # noqa: BLE001 - exception text may contain the bot token URL
+                print(f"telegram: poll failed; error_type={type(exc).__name__}", flush=True)
+                self._wait(stop_event, backoff)
+                backoff = min(backoff * 2, 60)
+                continue
             for update in updates:
                 update_id = update.get("update_id")
                 if isinstance(update_id, int):
@@ -93,4 +108,4 @@ class TelegramIntake:
                 except Exception:
                     # Do not print tokens, chat content, or personal data to logs.
                     continue
-            time.sleep(0.2)
+            self._wait(stop_event, 0.2)

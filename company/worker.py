@@ -4,8 +4,11 @@ import os
 import signal
 import sys
 import threading
+import time
 
 from .agent_runner import run_task
+from .notifier import notify_task_failed, notify_task_result
+from .scheduler import seed_due_tasks
 from .store import TaskStore
 
 REQUIRED_ENV = (
@@ -13,6 +16,15 @@ REQUIRED_ENV = (
     "SUPABASE_ANON_KEY",
     "SUPABASE_DB_GATE_KEY",
 )
+SEED_INTERVAL_SECONDS = 300
+
+
+def _safe_notify(func, *args):
+    """Notifications are best-effort and must never change a task's outcome."""
+    try:
+        func(*args)
+    except Exception as exc:  # noqa: BLE001
+        print(f"agent_worker: notify failed; error_type={type(exc).__name__}", flush=True)
 
 
 def process_one_task(store=None, provider=None):
@@ -31,6 +43,8 @@ def process_one_task(store=None, provider=None):
             f"persisted_outputs={len(results)}",
             flush=True,
         )
+        if task_id.startswith("auto-"):
+            _safe_notify(lambda: notify_task_result(store.get_task(task_id)))
         return {
             "status": "completed",
             "task_id": task_id,
@@ -51,6 +65,7 @@ def process_one_task(store=None, provider=None):
                 file=sys.stderr,
                 flush=True,
             )
+        _safe_notify(notify_task_failed, task_id, type(exc).__name__)
         return {
             "status": "failed",
             "task_id": task_id,
@@ -62,9 +77,18 @@ def run_forever(stop_event=None, poll_seconds: int = 15):
     """Poll the durable queue until a shutdown event is received."""
     stop_event = stop_event or threading.Event()
     print("agent_worker: polling Supabase queue; analysis_only=true", flush=True)
+    store = TaskStore()
+    last_seed = 0.0
     while not stop_event.is_set():
+        if time.monotonic() - last_seed >= SEED_INTERVAL_SECONDS:
+            last_seed = time.monotonic()
+            try:
+                seed_due_tasks(store)  # idempotent; creates today's autonomous work
+            except Exception as exc:  # noqa: BLE001 - a scheduler bug must not stop the queue
+                print(f"agent_worker: scheduler failed; error_type={type(exc).__name__}",
+                      file=sys.stderr, flush=True)
         try:
-            result = process_one_task()
+            result = process_one_task(store=store)
             if result["status"] in {"idle", "failed"}:
                 stop_event.wait(poll_seconds)
         except Exception as exc:
@@ -96,7 +120,12 @@ def main():
         parser.error("--poll-seconds must be at least 5")
 
     if args.once:
-        result = process_one_task()
+        store = TaskStore()
+        try:
+            seed_due_tasks(store)
+        except Exception as exc:  # noqa: BLE001
+            print(f"agent_worker: scheduler failed; error_type={type(exc).__name__}", file=sys.stderr, flush=True)
+        result = process_one_task(store=store)
         return 1 if result["status"] == "failed" else 0
 
     stop_event = threading.Event()

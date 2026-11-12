@@ -3,6 +3,16 @@ from .agents import load_agents, route_task
 from .llm import get_provider
 from .store import TaskStore
 
+# Roles that need live public-web evidence (companies, competitors, demand).
+SEARCH_AGENTS = frozenset({"research_intelligence", "marketing_growth", "product_business"})
+
+
+def _generate(provider, agent, system_prompt: str, prompt: str) -> str:
+    """Use grounded web search for research roles when the provider supports it."""
+    if agent.id in SEARCH_AGENTS and getattr(provider, "supports_search", False):
+        return provider.generate(system_prompt, prompt, use_search=True)
+    return provider.generate(system_prompt, prompt)
+
 
 def build_system_prompt(agent) -> str:
     capabilities = ", ".join(agent.capabilities)
@@ -57,7 +67,7 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
             f"{specialist_context}"
         )
         print(f"agent_worker: requesting agent={agent.id} task={task_id}", flush=True)
-        output = provider.generate(build_system_prompt(agent), prompt)
+        output = _generate(provider, agent, build_system_prompt(agent), prompt)
         store.record_agent_output(task_id, agent.id, output)
         print(f"agent_worker: saved agent={agent.id} task={task_id}", flush=True)
         results.append({"agent_id": agent.id, "output": output})
