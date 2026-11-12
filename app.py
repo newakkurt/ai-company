@@ -573,6 +573,7 @@ def crm_status():
                      "inbound classification", "approved-facts replies", "suppression list"],
         "outbound_sending": False, "human_approval_required": True,
         "privacy": "public business sources only; no private personal-data scraping",
+        "mailbox": services_status()["mail"],
     }
 
 @app.get("/api/crm/companies", dependencies=[Depends(require_api_key)])

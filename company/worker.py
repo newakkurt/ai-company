@@ -7,12 +7,13 @@ import signal
 import sys
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 from .agent_runner import run_task
 from .llm import get_provider
 from .product_factory import build_product
 from .crm import upsert_company as crm_upsert_company
-from .notifier import notify_task_failed, notify_task_result
+from .notifier import notify_owner, notify_task_failed, notify_task_result
 from .scheduler import seed_due_tasks
 from .store import TaskStore
 
@@ -65,6 +66,38 @@ def _safe_notify(func, *args):
         func(*args)
     except Exception as exc:  # noqa: BLE001
         print(f"agent_worker: notify failed; error_type={type(exc).__name__}", flush=True)
+
+
+def notify_due_followups(store=None, now=None):
+    """Send owner-only reminders for due CRM follow-ups; never contact prospects."""
+    store = store or TaskStore()
+    now = now or datetime.now(timezone.utc)
+    rows = store._request("crm_followups", params={
+        "select":"*", "status":"eq.pending", "due_at":f"lte.{now.isoformat()}", "limit":"100"
+    })
+    sent = 0
+    cutoff = now - timedelta(days=1)
+    for row in rows:
+        last = row.get("last_notified_at")
+        if last:
+            try:
+                last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+                if last_dt >= cutoff:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        message = (
+            "⏰ CRM takip zamanı geldi.\n"
+            f"Şirket kaydı: {row.get('company_id','—')}\n"
+            f"Not: {row.get('note') or 'Planlanan müşteri takibi'}\n"
+            f"Takip kaydı: {row.get('followup_id')}"
+        )
+        if notify_owner(message):
+            store._request("crm_followups", "PATCH",
+                           {"followup_id":f"eq.{row['followup_id']}"},
+                           {"last_notified_at":now.isoformat()}, "return=minimal")
+            sent += 1
+    return sent
 
 
 def process_one_task(store=None, provider=None):
@@ -171,6 +204,7 @@ def run_forever(stop_event=None, poll_seconds: int = 15):
     print("agent_worker: polling Supabase queue; analysis_only=true", flush=True)
     store = TaskStore()
     last_seed = 0.0
+    last_followup_check = 0.0
     while not stop_event.is_set():
         if time.monotonic() - last_seed >= SEED_INTERVAL_SECONDS:
             last_seed = time.monotonic()
@@ -178,6 +212,13 @@ def run_forever(stop_event=None, poll_seconds: int = 15):
                 seed_due_tasks(store)  # idempotent; creates today's autonomous work
             except Exception as exc:  # noqa: BLE001 - a scheduler bug must not stop the queue
                 print(f"agent_worker: scheduler failed; error_type={type(exc).__name__}",
+                      file=sys.stderr, flush=True)
+        if time.monotonic() - last_followup_check >= 300:
+            last_followup_check = time.monotonic()
+            try:
+                notify_due_followups(store=store)
+            except Exception as exc:
+                print(f"crm: follow-up reminder check failed; error_type={type(exc).__name__}",
                       file=sys.stderr, flush=True)
         try:
             result = process_one_task(store=store)
