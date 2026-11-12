@@ -72,17 +72,6 @@ PLAYBOOKS: tuple[Playbook, ...] = (
         "Draft only; the owner publishes." + _RULES,
     ),
     Playbook(
-        "digital-product-factory", "weekly",
-        ("research_intelligence", "product_business", "technology_architect",
-         "software_engineer", "network_infrastructure", "qa_testing", "security_compliance"),
-        "DIGITAL PRODUCT FACTORY: research current network/MSP buyer pains, select ONE narrow "
-        "problem with evidence, score urgency/willingness-to-pay/feasibility/differentiation/time-to-revenue/"
-        "supportability and security risk, then propose a tiny offline-first MVP specification. "
-        "The worker will generate one versioned Python API starter ZIP from these specialist findings. "
-        "No device connections, credentials, configuration changes, external contact, publishing or spending."
-        + _RULES,
-    ),
-    Playbook(
         "weekly-review", "weekly",
         ("chief_of_staff", "product_business", "marketing_growth", "data_analytics",
          "qa_testing", "security_compliance", "finance_revenue_ops", "memory_knowledge"),

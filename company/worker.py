@@ -75,8 +75,8 @@ def process_one_task(store=None, provider=None):
     try:
         results = run_task(task_id, store=store, provider=provider)
         if task_id.startswith("auto-digital-product-factory-"):
-            research_context = "\\n\\n".join(
-                f"[{item['agent_id']}]\\n{item['output']}" for item in results
+            research_context = "\n\n".join(
+                f"[{item['agent_id']}]\n{item['output']}" for item in results
             )
             release = build_product(
                 "Network Ops Starter",
@@ -84,7 +84,7 @@ def process_one_task(store=None, provider=None):
                 "for MSPs and IT teams. Use this week's specialist market/problem analysis "
                 "to choose the most valuable narrow feature. Parse user-supplied sample/config "
                 "text only; do not connect to devices, use credentials, or change infrastructure. "
-                "Research and buyer context:\\n" + research_context[:12000],
+                "Research and buyer context:\n" + research_context[:12000],
                 product_type="python_api",
                 version="0.1.0",
                 provider=provider or get_provider(),
@@ -92,7 +92,7 @@ def process_one_task(store=None, provider=None):
             import json
             store.record_agent_output(
                 task_id, "product_factory",
-                "Generated release metadata (source not executed):\\n"
+                "Generated release metadata (source not executed):\n"
                 + json.dumps(release, ensure_ascii=False, indent=2),
             )
             results.append({"agent_id": "product_factory", "output": json.dumps(release, ensure_ascii=False)})

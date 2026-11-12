@@ -32,15 +32,15 @@ class FactoryWorkerTests(unittest.TestCase):
         store = FakeStore()
         specialist_results = [{"agent_id": "product_business", "output": "Pain evidence"}]
         release = {"product_id": "prd-012345abcdef", "release_status": "review_required"}
-        with patch("company.worker.run_task", return_value=specialist_results), \\
-             patch("company.worker.build_product", return_value=release) as build, \\
+        with patch("company.worker.run_task", return_value=specialist_results), \
+             patch("company.worker.build_product", return_value=release) as build, \
              patch("company.worker._safe_notify"):
             result = process_one_task(store=store, provider=object())
 
         build.assert_called_once()
         self.assertEqual(result["status"], "completed")
         self.assertEqual(store.saved[0], "product_factory")
-        self.assertEqual(json.loads(store.saved[1].split("):\\n", 1)[-1]), release)
+        self.assertEqual(json.loads(store.saved[1].split("):\n", 1)[-1]), release)
         self.assertEqual(store.completed, 2)
 
 
