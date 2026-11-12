@@ -272,7 +272,7 @@ class DraftingProvider:
 def cfg(mode="draft", **kw):
     return MailConfig(imap_host="imap.test", smtp_host="smtp.test", user="support@company.test",
                       password="pw", from_addr="support@company.test", mode=mode,
-                      allowed_link_prefixes=("https://buymeacoffee.com/sevketkaynar",), knowledge="Owner-approved NetCmd facts: network operations product; owner confirms pricing and support.", **kw)
+                      allowed_link_prefixes=("https://buymeacoffee.com/sevketkaynar",), knowledge=kw.pop("knowledge", "Owner-approved NetCmd facts: network operations product; owner confirms pricing and support."), **kw)
 
 
 class MailboxTests(unittest.TestCase):
