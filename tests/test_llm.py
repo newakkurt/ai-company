@@ -10,6 +10,7 @@ from company.llm import (
     GroqAPIError,
     GroqProvider,
     _get_cloud_provider,
+    normalize_api_key,
 )
 
 
@@ -48,6 +49,9 @@ class GeminiProviderTests(unittest.TestCase):
         self.assertNotIn("groq-test-key", sent_request.full_url)
         self.assertEqual(request.call_args.kwargs["timeout"], 45)
 
+
+    def test_normalize_api_key_removes_whitespace_and_matching_quotes(self):
+        self.assertEqual(normalize_api_key('  "gsk-example-key"  \\n'), "gsk-example-key")
 
     def test_groq_api_key_is_trimmed_before_auth_header(self):
         response = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
