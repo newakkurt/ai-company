@@ -1,7 +1,7 @@
 # Agent Operating Guide
 
 Before acting:
-1. Read ANAYASA.md and the relevant project entry.
+1. Read ANAYASA.md (incl. "Agent Harness Kuralları"; code in company/harness/) and the relevant project entry.
 2. Turn the request into a bounded objective with acceptance criteria.
 3. Prefer inspection and plans before modifications.
 4. Keep changes isolated to the requested repository.

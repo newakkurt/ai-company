@@ -9,9 +9,23 @@ SEARCH_AGENTS = frozenset({"research_intelligence", "marketing_growth", "product
 
 def _generate(provider, agent, system_prompt: str, prompt: str) -> str:
     """Use grounded web search for research roles when the provider supports it."""
-    if agent.id in SEARCH_AGENTS and getattr(provider, "supports_search", False):
+    use_search = agent.id in SEARCH_AGENTS and getattr(provider, "supports_search", False)
+    if getattr(provider, "tiered", False) is True:  # privacy-first tiered routing
+        from .harness.routing import infer_task_kind
+        return provider.generate(system_prompt, prompt, use_search=use_search,
+                                 task_kind=infer_task_kind(agent.id, use_search))
+    if use_search:
         return provider.generate(system_prompt, prompt, use_search=True)
     return provider.generate(system_prompt, prompt)
+
+
+def _checkpoint(output: str) -> str:
+    """Verification checkpoint: never persist leaked credentials from a model output."""
+    from .harness.escalation import verify_output
+    from .harness.privacy import redact
+    if verify_output(output, min_chars=0).ok:
+        return output
+    return redact(output)[0]
 
 
 def build_system_prompt(agent) -> str:
@@ -74,7 +88,7 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
             f"{specialist_context}"
         )
         print(f"agent_worker: requesting agent={agent.id} task={task_id}", flush=True)
-        output = _generate(provider, agent, build_system_prompt(agent), prompt)
+        output = _checkpoint(_generate(provider, agent, build_system_prompt(agent), prompt))
         store.record_agent_output(task_id, agent.id, output)
         print(f"agent_worker: saved agent={agent.id} task={task_id}", flush=True)
         results.append({"agent_id": agent.id, "output": output})

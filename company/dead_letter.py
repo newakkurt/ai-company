@@ -75,4 +75,14 @@ def archive_if_exhausted(store, task_id: str, max_retries: int = 2,
                  json.dumps(snapshot, ensure_ascii=False)))
             store._event(db, task_id, "agent_task_dead_lettered", "scheduler",
                          {"retry_count": retries, "queue": "dead_letter_tasks"})
+    try:  # constitution: 3 failed attempts -> human review queue (best-effort)
+        from .harness.escalation import HumanReviewQueue
+        from .harness.state_machine import safe_record
+        review_id = HumanReviewQueue().enqueue(task_id, "retry_budget_exhausted", {
+            "description": payload["description"][:300], "retry_count": retries,
+            "error_type": last_error.get("error_type"),
+        }, [], retries + 1)
+        safe_record(task_id, "failed", "escalated", "retry_budget_exhausted", review_id=review_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"dead_letter: escalation failed; error_type={type(exc).__name__}", flush=True)
     return True

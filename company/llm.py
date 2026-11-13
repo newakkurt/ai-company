@@ -282,7 +282,7 @@ class FallbackProvider:
             return self.fallback.generate(system_prompt, user_prompt, **extra)
 
 
-def get_provider():
+def _get_cloud_provider():
     """Prefer Gemini; use Groq as a quota-safe fallback when its key is configured."""
     gemini = GeminiProvider() if os.getenv("GEMINI_API_KEY") else None
     groq = GroqProvider() if os.getenv("GROQ_API_KEY") else None
@@ -292,4 +292,22 @@ def get_provider():
         return gemini
     if groq:
         return groq
-    return GeminiProvider()
+    return None
+
+
+def get_provider():
+    """Return the model provider.
+
+    Default (hosted, unchanged): Gemini with optional Groq fallback.
+    Tiered mode (AI_COMPANY_ROUTING=tiered, or any AI_COMPANY_LOCAL_*_URL set): local-first
+    routing with privacy gating, see company/harness/routing.py.
+    """
+    cloud = _get_cloud_provider()
+    tiered = os.getenv("AI_COMPANY_ROUTING", "").strip().lower() == "tiered" or any(
+        os.getenv(name) for name in ("AI_COMPANY_LOCAL_SMALL_URL", "AI_COMPANY_LOCAL_LARGE_URL"))
+    if tiered:
+        from .harness.routing import Tier, TieredProvider, build_local_providers
+        local = build_local_providers()
+        allow_cloud = os.getenv("AI_COMPANY_ALLOW_CLOUD", "true").strip().lower() in {"1", "true", "yes", "on"}
+        return TieredProvider(local[Tier.SMALL_LOCAL], local[Tier.LARGE_LOCAL], cloud, allow_cloud)
+    return cloud or GeminiProvider()

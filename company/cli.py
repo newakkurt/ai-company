@@ -28,6 +28,20 @@ def main():
     approve = sub.add_parser("approve", help="Record human approval; does not execute")
     approve.add_argument("task_id")
     approve.add_argument("--note", default="")
+    review = sub.add_parser("review", help="Human review queue (SQLite) for escalated work")
+    review_sub = review.add_subparsers(dest="review_command", required=True)
+    review_sub.add_parser("list", help="List pending items")
+    for name in ("approve", "reject"):
+        item = review_sub.add_parser(name, help=f"{name.title()} one queued item (records the decision only)")
+        item.add_argument("review_id")
+        item.add_argument("--note", default="")
+    route = sub.add_parser("route-check", help="Dry-run privacy routing: which tier may see this text?")
+    route.add_argument("text")
+    route.add_argument("--kind", default="planning", choices=[k.value for k in __import__(
+        "company.harness.routing", fromlist=["TaskKind"]).TaskKind])
+    trace = sub.add_parser("trace", help="Show or verify a task's state-transition trace")
+    trace.add_argument("task_id")
+    trace.add_argument("--verify", action="store_true")
     sub.add_parser("telegram-poll", help="Receive allowlisted Telegram tasks")
     sub.add_parser("telegram-id", help="Show chat IDs from pending bot updates")
     args = parser.parse_args()
@@ -90,6 +104,44 @@ def main():
             parser.error(str(exc))
         print(f"Approval recorded: {item['task_id']}")
         print("This records approval only; it does not run code, publish, deploy, spend, or change devices.")
+    elif args.command == "review":
+        from .harness.escalation import HumanReviewQueue
+        queue = HumanReviewQueue()
+        if args.review_command == "list":
+            items = queue.list()
+            if not items:
+                print("No pending reviews.")
+            for item in items:
+                print(f"{item['review_id']} | {item['task_id']} | {item['reason']} | attempts={item['attempts']}")
+        else:
+            decision = "approved" if args.review_command == "approve" else "rejected"
+            try:
+                queue.decide(args.review_id, decision, "human", args.note)
+            except (KeyError, ValueError) as exc:
+                parser.error(str(exc))
+            print(f"Review {decision}: {args.review_id}")
+            print("This records the decision only; it does not run code, publish, deploy, spend, or change devices.")
+    elif args.command == "route-check":
+        import os
+        from .harness.routing import TaskKind, Tier, TieredProvider, build_local_providers
+        from .llm import _get_cloud_provider
+        local = build_local_providers()
+        router = TieredProvider(local[Tier.SMALL_LOCAL], local[Tier.LARGE_LOCAL], _get_cloud_provider(),
+                                os.getenv("AI_COMPANY_ALLOW_CLOUD", "true").lower() in {"1", "true", "yes", "on"})
+        order, decision = router.plan(TaskKind(args.kind), args.text)
+        print(f"Sensitive: {decision.sensitive} {decision.findings or ''}")
+        print("Eligible tiers (in order): " + (", ".join(t.value for t in order) or "NONE -> human review"))
+        for tier, reason in decision.skipped:
+            print(f"  skipped {tier}: {reason}")
+    elif args.command == "trace":
+        from .harness.state_machine import read_trace, verify_trace
+        for record in read_trace(args.task_id):
+            print(f"{record['seq']:>3} {record['ts']} {record['from']} -> {record['to']} "
+                  f"({record['trigger']}) {record['params'] or ''}")
+        if args.verify:
+            ok, reason = verify_trace(args.task_id)
+            print("Trace integrity: " + ("OK" if ok else "FAILED — " + reason))
+            raise SystemExit(0 if ok else 1)
     elif args.command == "telegram-id":
         from .telegram import TelegramIntake
         try:
