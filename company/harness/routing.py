@@ -249,6 +249,21 @@ class TieredProvider:
             provider = self.providers[tier]
             search_here = use_search and getattr(provider, "supports_search", False)
             decision.search_dropped = bool(use_search and not search_here)
+            if tier is Tier.LARGE_LOCAL:
+                from .context_gate import (
+                    available_memory_gb, estimate_model_gb, fits_in_budget, memory_budget_gb,
+                )
+                available = available_memory_gb()
+                budget = memory_budget_gb()
+                if available is not None:
+                    budget = min(budget, available)
+                params_b = float(os.getenv("AI_COMPANY_LOCAL_LARGE_PARAMS_B", "32"))
+                quant_bits = int(os.getenv("AI_COMPANY_LOCAL_QUANT_BITS", "4"))
+                reserve = float(os.getenv("AI_COMPANY_MEM_RESERVE_GB", "6"))
+                required = estimate_model_gb(params_b, quant_bits)
+                if not fits_in_budget(0, required, reserve_gb=reserve, budget_gb=budget):
+                    decision.skipped.append((tier.value, "memory_budget_exceeded"))
+                    continue
             try:
                 if tier is Tier.LARGE_LOCAL:
                     with self._large_lock:
