@@ -364,7 +364,7 @@ def main():
         store = TaskStore()
         try:
             from .crm import verify_unchecked_companies
-            checked = verify_unchecked_companies(store=store, limit=2)
+            checked = verify_unchecked_companies(store=store, limit=5)
             if checked:
                 print(
                     "crm: source verification batch completed; "
