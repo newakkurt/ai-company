@@ -28,9 +28,9 @@ The first release is configuration-file based and read-only. No live-device acce
 ### 1. Network Audit (core paid deliverable)
 - Input: customer-supplied sanitized running configuration and optional inventory.
 - Initial vendors: Huawei, Cisco, Aruba.
-- Implemented first-pass checks: NTP, remote logging, AAA, Telnet-related directives and interface descriptions, all based only on supplied text evidence.
-- Planned next checks (not yet implemented): SNMP posture, VLAN/trunk hygiene, unused-port candidates, port security, BPDU protections, DHCP snooping/DAI and vendor-specific management-plane checks.
-- The current parser is a small first-pass module, not a complete compliance engine; every finding must retain source evidence and be human-reviewed.
+- Implemented first-pass checks in `company/network_audit.py`: NTP, remote logging, AAA, SSH management directives, port-security directives, BPDU protection, DHCP snooping, Telnet exposure, SNMP community detection with evidence redaction, and physical-interface descriptions.
+- Planned next checks (not yet implemented): VLAN/trunk consistency, unused-port candidates, deeper vendor-specific syntax and effective-policy validation.
+- The parser is an evidence-backed text review, not a complete compliance engine; every finding must retain source evidence and be human-reviewed.
 - Output: executive summary, findings with evidence, severity, remediation commands as suggestions, exclusions/assumptions, and a PDF/CSV-ready report.
 - Human review required before a report is delivered as a final assessment.
 
@@ -127,7 +127,7 @@ This is a target composition, not a forecast or guarantee. It requires customer 
 ## Next engineering backlog
 
 1. Expand the read-only vendor parser and normalized inventory model.
-2. Implement and test the planned vendor-specific evidence checks (SNMP, VLAN/trunk, port security, STP/BPDU, DHCP snooping/DAI).
+2. Implement and test VLAN/trunk consistency, unused-port candidates and deeper vendor-specific effective-policy checks.
 3. Deterministic HTML/Markdown report output and sample dataset.
 4. Unit tests with sanitized sample configurations.
 5. Customer-safe upload, deletion and retention workflow.
