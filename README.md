@@ -50,26 +50,13 @@ Gerekli temel değişkenler:
 
 ### Worker çalışma modu
 
-Aynı anda yalnızca **tek queue consumer** çalışmalıdır. İki desteklenen mod vardır:
+Aynı anda yalnızca **tek queue consumer** çalışmalıdır. Canlı ortamın seçili modu GitHub Actions scheduled worker'dır.
 
-**A) Render embedded worker**
-- Render Environment: `AI_COMPANY_EMBEDDED_WORKER=true`
-- Render üzerinde `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY` ve en az bir AI sağlayıcı anahtarı bulunmalı.
-- Bu modda GitHub Actions `agent-worker.yml` consumer'ı çalıştırılmaz; Actions secret'larını ayrıca tanımlamak zorunlu değildir.
-
-**B) GitHub Actions scheduled worker**
-- Render Environment: `AI_COMPANY_EMBEDDED_WORKER=false`
-- Repository Actions Secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY` ve `GEMINI_API_KEY` veya `GROQ_API_KEY`.
-- `agent-worker.yml` planlandığında bir çalıştırmada en fazla bir görevi işler. GitHub zamanlayıcısı kesin zaman garantisi vermez.
-
-**Son doğrulanan canlı durum (2026-11-13):** Render günlük sağlık raporu embedded worker'ı `enabled=true`, `running=true`, `restarts=0` olarak gördü. GitHub Actions worker gerekli repository secrets bulunmadığı için güvenli biçimde durakladı. Bu nedenle iki consumer aynı anda çalışmıyor. Canlı mod değiştirirken önce diğer consumer'ı kapatıp sonra yenisini etkinleştir.
-
-### Worker ve kota
-
-- Scheduler günde iki bounded task seçer; 14 ajanın tamamını her göreve göndermeye çalışmaz.
-- Quota hataları 24 saat bekletilir ve en fazla bir kez yeniden denenir.
-- Task heartbeat, uzun model çağrılarında 15 dakikalık stale-lease requeue riskini azaltır.
-- Render Free uyku/yeniden başlama davranışı ve GitHub zamanlayıcı gecikmeleri nedeniyle **7/24 kesintisiz çalışma garantisi yoktur**.
+- Render Environment: `AI_COMPANY_EMBEDDED_WORKER=false` (Render web servisi API/dashboard olarak kalır).
+- Repository Actions Secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY` ve `GROQ_API_KEY`; Gemini anahtarı opsiyoneldir.
+- `.github/workflows/agent-worker.yml` her 5 dakikada bir en fazla bir görevi işler. GitHub zamanlayıcısı kesin zaman garantisi vermez.
+- Son doğrulanan Actions logunda Groq anahtarı mevcut, Gemini anahtarı boştu; worker bu durumda Groq'u doğrudan seçer.
+- Render embedded worker'ı etkinleştirmek istersen önce Actions schedule'ı kapat; iki consumer aynı anda çalıştırılmamalıdır.
 
 ## Ürün yayınlama ve teslimat
 
