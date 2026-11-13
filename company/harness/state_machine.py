@@ -12,6 +12,7 @@ import json
 import os
 import re
 import threading
+import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -86,7 +87,22 @@ def _hash(record: dict) -> str:
     return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def _hosted_store():
+    if not all(os.getenv(key) for key in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY")):
+        return None
+    from ..store import SupabaseTaskStore
+    return SupabaseTaskStore()
+
+
 def read_trace(task_id: str, directory: Path | None = None) -> list[dict]:
+    if directory is None:
+        store = _hosted_store()
+        if store is not None:
+            rows = store._request("events", params={
+                "select": "details_json,created_at", "task_id": f"eq.{task_id}",
+                "event_type": "eq.harness_transition", "order": "created_at.asc", "limit": "1000",
+            })
+            return [row["details_json"] for row in rows if isinstance(row.get("details_json"), dict)]
     path = _trace_path(task_id, directory)
     if not path.is_file():
         return []
@@ -112,10 +128,21 @@ def record_transition(task_id: str, src, dst, trigger: str, params: dict | None 
             "prev_hash": existing[-1]["hash"] if existing else GENESIS,
         }
         record["hash"] = _hash(record)
-        path = _trace_path(task_id, directory)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        store = _hosted_store() if directory is None else None
+        if store is not None:
+            store._request("events", "POST", body={
+                "event_id": "trace-" + uuid.uuid4().hex,
+                "task_id": task_id,
+                "event_type": "harness_transition",
+                "actor": trigger,
+                "details_json": record,
+                "created_at": record["ts"],
+            }, prefer="return=minimal")
+        else:
+            path = _trace_path(task_id, directory)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
     return record
 
 
