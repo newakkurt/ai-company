@@ -1,7 +1,7 @@
 """Explicit task state machine with a tamper-evident decision trace (principle 2).
 
-Every transition is validated against TRANSITIONS and appended to a JSONL trace
-(`data/traces/<task_id>.jsonl`). Records are hash-chained so a later edit or
+Every transition is validated against TRANSITIONS and appended to a durable hosted Supabase
+`events` record or a local JSONL trace (`data/traces/<task_id>.jsonl`). Records are hash-chained so a later edit or
 deletion is detectable with verify_trace(). Parameters are redacted before
 being written.
 """
@@ -185,6 +185,8 @@ def safe_record(task_id: str, src, dst, trigger: str, **params):
     """Best-effort tracing for production paths: never raises, never alters task outcome."""
     try:
         return record_transition(task_id, src, dst, trigger, params, enforce=True)
-    except Exception as exc:  # noqa: BLE001
+    except InvalidTransition:
+        raise
+    except Exception as exc:  # noqa: BLE001 - trace I/O must not hide the task outcome
         print(f"trace: write failed; error_type={type(exc).__name__}", flush=True)
         return None
