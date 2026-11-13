@@ -61,6 +61,17 @@ class GeminiProviderTests(unittest.TestCase):
         self.assertIn("Invalid API Key", str(raised.exception))
         self.assertNotIn("groq-test-secret", str(raised.exception))
 
+
+    def test_groq_http_error_redacts_tokens_from_plain_text_body(self):
+        response = io.BytesIO(b"Access denied for gsk_abcdefghijklmnop123456")
+        error = HTTPError(GroqProvider.ENDPOINT, 403, "Forbidden", {}, response)
+        with patch("company.llm.urlopen", side_effect=error):
+            with self.assertRaises(GroqAPIError) as raised:
+                GroqProvider(api_key="groq-test-secret").generate("system", "user")
+        self.assertIn("HTTP 403", str(raised.exception))
+        self.assertIn("Access denied", str(raised.exception))
+        self.assertNotIn("gsk_abcdefghijklmnop123456", str(raised.exception))
+
     def test_fallback_uses_groq_when_gemini_quota_is_exhausted(self):
         class Primary:
             def generate(self, *_args):
