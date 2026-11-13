@@ -8,6 +8,7 @@ from company.llm import (
     GeminiAPIError,
     GeminiProvider,
     GroqProvider,
+    _get_cloud_provider,
 )
 
 
@@ -207,3 +208,25 @@ class FallbackSearchTests(unittest.TestCase):
         output = FallbackProvider(Primary(), fallback).generate("system", "user")
         self.assertEqual(output, "fallback")
         self.assertEqual(fallback.prompts, ("system", "user"))
+
+
+class ProviderSelectionTests(unittest.TestCase):
+    def test_groq_is_selected_when_only_groq_key_is_configured(self):
+        with patch.dict("os.environ", {"GROQ_API_KEY": "groq-test-key"}, clear=True):
+            provider = _get_cloud_provider()
+        self.assertIsInstance(provider, GroqProvider)
+
+    def test_gemini_and_groq_create_quota_fallback_chain(self):
+        with patch.dict(
+            "os.environ",
+            {"GEMINI_API_KEY": "gemini-test-key", "GROQ_API_KEY": "groq-test-key"},
+            clear=True,
+        ):
+            provider = _get_cloud_provider()
+        self.assertIsInstance(provider, FallbackProvider)
+        self.assertIsInstance(provider.primary, GeminiProvider)
+        self.assertIsInstance(provider.fallback, GroqProvider)
+
+    def test_no_provider_key_returns_none(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertIsNone(_get_cloud_provider())
