@@ -264,7 +264,11 @@ def process_one_task(store=None, provider=None):
             store.fail_task(
                 task_id,
                 error_type=type(exc).__name__,
-                error_summary=str(exc) if type(exc).__name__ == "GeminiAPIError" else None,
+                error_summary=(
+                    str(exc)[:300]
+                    if type(exc).__name__ in {"GeminiAPIError", "GroqAPIError"}
+                    else None
+                ),
             )
         finally:
             print(
