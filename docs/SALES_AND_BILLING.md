@@ -58,7 +58,7 @@ Use a dedicated support mailbox and configure:
 
 ## Required live tests
 
-1. BMC test event (`live_mode=false` must not create a sale.
+1. A BMC test event with `live_mode=false` must not create a sale.
 2. One controlled live membership must create exactly one payment ledger row and one entitlement.
 3. Re-delivery of the same webhook must not create a second entitlement or duplicate email.
 4. A pending entitlement must become deliverable after product publication.
