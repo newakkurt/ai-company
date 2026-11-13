@@ -184,7 +184,12 @@ class CircuitBreaker:
         with self._lock:
             if self._failures < self.threshold:
                 return True
-            return current - self._opened_at >= self.reset_seconds
+            if current - self._opened_at >= self.reset_seconds:
+                # Permit one half-open trial; a failure will open a fresh window.
+                self._failures = self.threshold - 1
+                self._opened_at = 0.0
+                return True
+            return False
 
     def record_success(self) -> None:
         with self._lock:
