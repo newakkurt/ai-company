@@ -65,7 +65,7 @@ Ayrıntılar: [Product publishing and delivery](docs/PRODUCT_PUBLISHING_AND_DELI
 1. Ürün fabrikası ZIP üretir ve Supabase'e kaydeder; durum `review_required`.
 2. Sahip, `product_id` + `sha256` kapsamıyla `publish_product` onayı oluşturur.
 3. Onay sonrası `POST /api/factory/products/{product_id}/publish` çağrılır.
-4. BMC level ID, yayınlanmış `product_id` ve fiyat ile `BMC_PRODUCT_LEVEL_MAP` içine eşlenir.
+4. Shop ürünleri `BMC_EXTRA_PRODUCT_MAP` ile `extras[].id` → yayınlanmış `product_id`/USD fiyat şeklinde eşlenir. Recurring PRO üyeliği için gerçek `BMC_PRO_MEMBERSHIP_LEVEL_ID` ve gerekiyorsa `BMC_PRODUCT_LEVEL_MAP` gerekir.
 5. İmzalı canlı ödeme webhook'u entitlement oluşturur; SMTP hazırsa alıcıya 7 gün / 5 indirme limitli link gönderilir.
 6. Ürün ödeme anında henüz yayınlanmamışsa entitlement pending kalır; yayın sonrası `POST /api/payments/entitlements/{subscription_id}/deliver` ile teslimat tamamlanır.
 7. İade/iptal/duraklatma entitlement erişimini kapatır.
