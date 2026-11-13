@@ -22,16 +22,16 @@ This is the enforceable operating baseline for New Akkurt AI Company. Existing p
 
 ## Enforcement status
 
-The governance helper implements conservative task-description classification, cloud-route denial for non-public work, a process-local circuit breaker, a kill-switch flag, least-privilege capability definitions, approval-required action classification and explicit retry constants.
+The governance helper and worker implement conservative screening of task descriptions and assembled prompts, cloud-route denial for non-public work, a process-local provider circuit breaker, a kill switch, least-privilege agent capability/tool allowlists, a daily task-count cap, and a three-total-attempt retry ceiling. Blocked tasks are moved to a terminal `blocked` state with an audit event. Existing scoped approval records remain the gate for protected actions.
 
-The worker must check the kill switch and model route before invoking an LLM. The local-model adapter, persistent usage metering, persistent circuit-breaker state, per-agent tool sandbox, encrypted backup/restore rehearsal and live alert delivery remain separate production gates. Do not mark these as active until verified.
+Not yet active: local model inference (no Ollama adapter), persistent provider-spend metering, persistent circuit-breaker state across restarts, per-agent execution sandbox, encrypted backup/restore rehearsal, and live alert delivery. Do not mark these as active until verified.
 
 ## Configuration
 
 - `AI_COMPANY_KILL_SWITCH=true`: pause worker task processing.
 - `OLLAMA_BASE_URL` and `AI_COMPANY_LOCAL_MODEL`: declare a local model endpoint/model; this alone does not activate local inference until an adapter exists.
-- `AI_COMPANY_DAILY_TASK_LIMIT`: planned daily task cap (default 20; enforcement requires scheduler integration).
-- `AI_COMPANY_MONTHLY_SPEND_LIMIT_USD`: monthly spend cap (default 0; enforcement requires usage metering).
+- `AI_COMPANY_DAILY_TASK_LIMIT`: worker-enforced daily task creation/processing cap (default 20; counts the latest 100 task records).
+- `AI_COMPANY_MONTHLY_SPEND_LIMIT_USD`: intended monthly spend cap (default 0; currently reporting/configuration only, not enforced until provider usage metering is implemented).
 - Existing `AI_COMPANY_API_KEY`, Supabase and provider secrets remain in Render's secret environment only.
 
 ## Safety contract
