@@ -1,6 +1,6 @@
 # Roadmap and production gates
 
-Status snapshot: 2026-11-13, after Supabase URL repair and worker-mode correction.
+Status snapshot: 2026-11-13, after approval-safe queue claim hardening and verified Groq smoke test.
 
 ## Live integration status
 
@@ -9,23 +9,23 @@ Status snapshot: 2026-11-13, after Supabase URL repair and worker-mode correctio
 - [x] Hosted readiness monitor previously passed: 14 agents, Supabase connected, analysis-only mode. The embedded worker is now intentionally disabled in favor of the scheduled Actions consumer.
 - [x] Supabase migrations through `20261112145112_product_download_rpc_security_invoker` were previously applied (20 recorded migrations); the 2026-11-13 performance SQL was applied directly and its idempotent migration file is committed for future environments.
 - [x] RLS is enabled on approval, product, mail, CRM, membership and payment tables; latest Supabase security advisor returned zero lints.
-- [x] Python 3.10, 3.11 and 3.12 CI passed on the latest provider-normalization commit.
+- [x] Python 3.10, 3.11 and 3.12 CI passed on commit `b29b9f3c6dd89bc71d003986e708470d365a83cf`.
 - [x] GitHub Actions is the selected queue consumer; Render embedded worker has been switched off to prevent two consumers racing on the same queue.
 
 ## Verified production snapshot
 
 - Render service: `https://ai-company-ferd.onrender.com`; latest observed deployment is live.
 - Worker mode: GitHub Actions scheduled `python -m company.worker --once`; Render embedded worker is configured off.
-- Provider: GitHub Actions selects Groq directly (`openai/gpt-oss-20b`); key normalization trims whitespace/quotes, TPM 429s use bounded backoff, and a real CEO smoke task plus content tasks completed. Render web API still reports Gemini only, but its embedded worker is off. Worker cron `*/5` is configured and manual `workflow_dispatch` is enabled; push-triggered runs passed, but no `schedule`-event run was observed in this audit window, so confirm the workflow is enabled in GitHub Actions.
+- Provider: GitHub Actions selected Groq directly (`openai/gpt-oss-20b`). The dedicated task `smoke-groq-provider-20261113-1900` completed on 2026-11-13: worker logs show the Groq route, the task changed to `completed`, and four agent outputs were persisted. This proves a real Groq-backed provider call from the Actions worker. Render web API still reports Gemini only, but its embedded worker is off. Worker cron `*/5` is configured and manual `workflow_dispatch` is enabled; push-triggered runs passed, but no `schedule`-event worker run was observed in this audit window.
 - Supabase CRM: 16 companies were checked in bounded batches: 10 `reachable_match`, 2 `reachable_no_match`, 2 `too_large`, 2 `unreachable`. A reachable match is source evidence, not human identity/legal approval; all remain in `new` stage.
-- Queue at last database inspection: 9 completed tasks, 15 historical failed tasks, 15 dead-letter records, and 89 agent output rows. The failed/dead-letter history is retained; the two old Gemini-quota approval requests were expired after replacement drafts were generated.
+- Queue at last database inspection: 9 completed tasks, 24 failed tasks, 7 planned tasks, 15 dead-letter records, and 98 agent output rows. Failed tasks and dead-letter history are retained; no bulk retry has been performed. The failed/dead-letter history is retained; the two old Gemini-quota approval requests were expired after replacement drafts were generated.
 - Commerce: 1 product release remains `review_required`; its persisted ZIP SHA-256 matches the stored bytes, but runtime QA is pending. Payment events, ledger entries, memberships, entitlements and bank settlements are all 0. `/readyz` confirms BMC webhook/product mappings, SMTP and Telegram owner notifications are not configured; mail remains draft-only. No paid sale or buyer delivery has been proven.
 - Security advisor: zero lints. Performance advisor: the 10 missing foreign-key indexes and 12 RLS initplan policies are fixed; only 17 informational unused-index notices remain. New FK indexes are intentionally retained for referential integrity and expected future lookups.
 
 ## Required before autonomous operation
 
 1. [x] Use GitHub Actions as the sole queue consumer; Render embedded worker has been disabled. Latest workflow logs confirm Supabase and Groq secrets are present.
-2. [x] Verify Groq end-to-end: a CEO smoke task generated and persisted an output. The Turkish SEO article and three-email educational sequence were generated and persisted by the content agent in analysis-only mode; neither was published or sent.
+2. [x] Verify Groq end-to-end: the dedicated Groq smoke task completed with four persisted agent outputs. Worker logs confirm `provider_route=groq` and task completion. The Turkish SEO article and three-email educational sequence were generated and persisted by the content agent in analysis-only mode; neither was published or sent.
 3. [ ] Recover failed/dead-letter tasks in bounded batches after provider verification; preserve all original events and outputs.
 4. [x] Run the 16-source verification backfill. Human review is still required for no-match, too-large and unreachable records, and before any outreach.
 5. [ ] Generate a product release, inspect the ZIP, run it in an isolated QA environment (network disabled, resource/dependency scan), then approve publication against its exact product ID and SHA-256.
