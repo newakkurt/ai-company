@@ -54,7 +54,7 @@ Aynı anda yalnızca **tek queue consumer** çalışmalıdır. Canlı ortamın s
 
 - Render Environment: `AI_COMPANY_EMBEDDED_WORKER=false` (Render web servisi API/dashboard olarak kalır).
 - Repository Actions Secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY` ve `GROQ_API_KEY`; Gemini anahtarı opsiyoneldir.
-- `.github/workflows/agent-worker.yml` her 5 dakikada bir en fazla bir görevi işler. GitHub zamanlayıcısı kesin zaman garantisi vermez.
+- `.github/workflows/agent-worker.yml` her 5 dakikada bir en fazla bir görevi işler; ayrıca GitHub Actions ekranından **Run workflow** ile elle tetiklenebilir. GitHub zamanlayıcısı kesin zaman garantisi vermez.
 - Son doğrulanan Actions logunda Groq anahtarı mevcut, Gemini anahtarı boştu; worker bu durumda Groq'u doğrudan seçer.
 - Render embedded worker'ı etkinleştirmek istersen önce Actions schedule'ı kapat; iki consumer aynı anda çalıştırılmamalıdır.
 
