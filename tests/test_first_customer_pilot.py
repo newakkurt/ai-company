@@ -13,10 +13,10 @@ class FirstCustomerPilotTests(unittest.TestCase):
         self.assertTrue(offer.is_file())
         text = offer.read_text(encoding="utf-8")
         for required in (
-            "One site",
+            "One customer site.",
             "Up to 10 network devices",
             "No direct device connection",
-            "3 business days",
+            "Three business days",
             "Secrets removed",
             "not a live checkout",
             "USD 69/month",
