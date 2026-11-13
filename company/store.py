@@ -220,7 +220,7 @@ class SupabaseTaskStore:
         task_id = rows[0]["task_id"]
         claimed = self._request("tasks", "PATCH", {
             "task_id": f"eq.{task_id}", "status": "eq.planned",
-            "execution_mode": "eq.dry_run",
+            "execution_mode": "eq.dry_run", "approval_required": "eq.false",
         }, {"status": "running", "updated_at": utc_now()}, "return=representation")
         if not claimed:
             return None
