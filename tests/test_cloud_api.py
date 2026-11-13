@@ -30,6 +30,8 @@ class CloudApiImportTests(unittest.TestCase):
         self.assertTrue(result["provider"]["gemini"])
         self.assertFalse(result["external_actions_enabled"])
         self.assertTrue(result["worker"]["running"])
+        self.assertIn("bmc_webhook_configured", result["commerce"])
+        self.assertIn("smtp_configured", result["commerce"])
 
     def test_readiness_is_not_ready_when_worker_enabled_but_stopped(self):
         with patch("app.database_status", return_value={
@@ -53,6 +55,27 @@ class CloudApiImportTests(unittest.TestCase):
             result = app.readiness()
         self.assertFalse(result["ready"])
 
+
+
+
+class CommerceStatusTests(unittest.TestCase):
+    def test_commerce_status_reports_presence_without_values(self):
+        with patch.dict("os.environ", {
+            "BMC_WEBHOOK_SECRET": "secret-value",
+            "BMC_EXTRA_PRODUCT_MAP": "{\"shop-id\":\"product\"}",
+            "MAIL_SMTP_HOST": "smtp.example",
+            "MAIL_USER": "owner@example.com",
+            "MAIL_PASSWORD": "mail-secret",
+            "MAIL_FROM": "owner@example.com",
+            "AI_COMPANY_MAIL_MODE": "draft",
+        }, clear=True):
+            status = app.commerce_status()
+        self.assertTrue(status["bmc_webhook_configured"])
+        self.assertTrue(status["bmc_shop_mapping_configured"])
+        self.assertTrue(status["smtp_configured"])
+        self.assertEqual(status["mail_mode"], "draft")
+        self.assertNotIn("secret-value", repr(status))
+        self.assertNotIn("mail-secret", repr(status))
 
 if __name__ == "__main__":
     unittest.main()
