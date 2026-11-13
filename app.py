@@ -37,6 +37,7 @@ from company.notifier import (
 from company.scheduler import auto_tasks_enabled
 from company.store import TaskStore
 from company.worker import run_supervised, supervisor_status
+from company.governance import governance_snapshot
 
 ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "web"
@@ -281,6 +282,12 @@ def status():
         "database": database_status(),
         "worker": worker_status(),
     }
+
+
+@app.get("/api/governance/status", dependencies=[Depends(require_api_key)])
+def governance_status():
+    """Expose policy state without returning secrets or customer data."""
+    return governance_snapshot()
 
 
 @app.get("/api/agents", dependencies=[Depends(require_api_key)])
