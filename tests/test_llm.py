@@ -230,3 +230,7 @@ class ProviderSelectionTests(unittest.TestCase):
     def test_no_provider_key_returns_none(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertIsNone(_get_cloud_provider())
+
+
+if __name__ == "__main__":
+    unittest.main()
