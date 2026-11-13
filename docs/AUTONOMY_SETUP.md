@@ -18,7 +18,7 @@ Aktif tercih GitHub Actions scheduled worker'dır:
 - `.github/workflows/agent-worker.yml` her 5 dakikada bir çalışır.
 - Her çalışmada en fazla bir task işler; GitHub concurrency aynı workflow çalıştırmalarını sıraya alır. GitHub Actions ekranında `Run workflow` ile manuel tetikleme de vardır. Render embedded worker kapalıdır; ikinci consumer yoktur.
 - Repository secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY`, `GROQ_API_KEY` (Gemini opsiyoneldir).
-- Son doğrulanan Actions ortamında Groq doğrudan seçildi (`openai/gpt-oss-20b`); kopyalanan anahtarlardaki boşluk/çift tırnak normalize edilir. CEO agent smoke test'i gerçek çıktı üreterek tamamlandı.
+- Son doğrulanan Actions ortamında Groq doğrudan seçildi (`openai/gpt-oss-20b`); kopyalanan anahtarlardaki boşluk/çift tırnak normalize edilir, TPM 429 hatalarında sınırlı backoff uygulanır. CEO smoke testi, Türkçe SEO makalesi ve üç e-postalık eğitim dizisi gerçek çıktı olarak kaydedildi.
 - Render web servisi `AI_COMPANY_EMBEDDED_WORKER=false` ile API/dashboard olarak kalır.
 
 Render embedded worker yalnızca bilinçli geçişte kullanılmalıdır:
@@ -48,7 +48,7 @@ AI_COMPANY_EMBEDDED_TELEGRAM=false
 
 - Ajanlar şirket adaylarını yalnızca açık kaynaklardan araştırır.
 - Her kaynak URL'si public HTTPS, DNS/IP pinning, redirect kontrolü ve sınırlı içerik boyutu ile doğrulanır.
-- Worker her çalışmada en fazla 5 adet `not_checked` CRM kaynağını kontrol eder. HTTP 200/eşleşme yalnızca kaynak kanıtıdır; şirket kimliği ve hukuki iletişim dayanağı için insan onayı gerekir. Erişilemeyen/çok büyük/eşleşmeyen kayıtlar otomatik `qualified` yapılmaz.
+- `content_communications` rolü içerik görevi aldığında plan yerine tam makale/e-posta taslağı üretir; doğrulanmamış ürün özelliklerini gerçekmiş gibi sunmaz. Worker her çalışmada en fazla 5 adet `not_checked` CRM kaynağını kontrol eder. HTTP 200/eşleşme yalnızca kaynak kanıtıdır; şirket kimliği ve hukuki iletişim dayanağı için insan onayı gerekir. Erişilemeyen/çok büyük/eşleşmeyen kayıtlar otomatik `qualified` yapılmaz.
 - Sahip CRM ekranında kaynağı ve şirketi kontrol edip "Verify source" yapmadan şirket `qualified` aşamasına geçemez.
 - Soğuk e-posta otomatik gönderilmez. Teklifler taslak olarak hazırlanır; iletişim için yasal dayanak ve insan onayı gerekir.
 
