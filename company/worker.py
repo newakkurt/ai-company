@@ -333,8 +333,8 @@ def configured_provider_route() -> tuple[str, str]:
     )
     if tiered:
         return "tiered_local_first", "local"
-    gemini = bool(os.getenv("GEMINI_API_KEY"))
-    groq = bool(os.getenv("GROQ_API_KEY"))
+    gemini = bool(os.getenv("GEMINI_API_KEY", "").strip())
+    groq = bool(os.getenv("GROQ_API_KEY", "").strip())
     if gemini and groq:
         return "gemini_primary_groq_fallback", os.getenv("AI_COMPANY_GEMINI_MODEL", "gemini-3.5-flash-lite")
     if groq:
@@ -346,7 +346,7 @@ def configured_provider_route() -> tuple[str, str]:
 
 def validate_environment():
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
-    if not (os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY")):
+    if not (os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GROQ_API_KEY", "").strip()):
         missing.append("GEMINI_API_KEY or GROQ_API_KEY")
     if missing:
         raise RuntimeError("Missing required worker secrets: " + ", ".join(missing))
