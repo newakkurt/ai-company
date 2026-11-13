@@ -232,7 +232,7 @@ def block_claimed_task(store, task_id: str, reason: str) -> bool:
         store._request(
             "assignments", "PATCH",
             {"task_id": f"eq.{task_id}", "status": "in.(suggested,running)"},
-            {"status": "blocked"}, "return=minimal",
+            {"status": "failed"}, "return=minimal",
         )
         store._event(task_id, "agent_task_blocked", "governance", details)
         return True
@@ -244,7 +244,7 @@ def block_claimed_task(store, task_id: str, reason: str) -> bool:
         if not changed:
             return False
         db.execute(
-            "UPDATE assignments SET status='blocked' WHERE task_id=? AND status IN ('suggested','running')",
+            "UPDATE assignments SET status='failed' WHERE task_id=? AND status IN ('suggested','running')",
             (task_id,),
         )
         store._event(db, task_id, "agent_task_blocked", "governance", details)
