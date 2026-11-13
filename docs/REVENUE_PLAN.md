@@ -28,7 +28,9 @@ The first release is configuration-file based and read-only. No live-device acce
 ### 1. Network Audit (core paid deliverable)
 - Input: customer-supplied sanitized running configuration and optional inventory.
 - Initial vendors: Huawei, Cisco, Aruba.
-- Checks: management access/AAA, NTP, logging, SNMP, VLAN and trunk hygiene, access-port descriptions, unused-port candidates, port security, BPDU protections, DHCP snooping/DAI where supported, insecure management protocols.
+- Implemented first-pass checks: NTP, remote logging, AAA, Telnet-related directives and interface descriptions, all based only on supplied text evidence.
+- Planned next checks (not yet implemented): SNMP posture, VLAN/trunk hygiene, unused-port candidates, port security, BPDU protections, DHCP snooping/DAI and vendor-specific management-plane checks.
+- The current parser is a small first-pass module, not a complete compliance engine; every finding must retain source evidence and be human-reviewed.
 - Output: executive summary, findings with evidence, severity, remediation commands as suggestions, exclusions/assumptions, and a PDF/CSV-ready report.
 - Human review required before a report is delivered as a final assessment.
 
@@ -124,8 +126,8 @@ This is a target composition, not a forecast or guarantee. It requires customer 
 
 ## Next engineering backlog
 
-1. Read-only vendor config parser and normalized inventory model.
-2. Evidence-based audit rules and severity model.
+1. Expand the read-only vendor parser and normalized inventory model.
+2. Implement and test the planned vendor-specific evidence checks (SNMP, VLAN/trunk, port security, STP/BPDU, DHCP snooping/DAI).
 3. Deterministic HTML/Markdown report output and sample dataset.
 4. Unit tests with sanitized sample configurations.
 5. Customer-safe upload, deletion and retention workflow.
