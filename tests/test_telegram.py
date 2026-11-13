@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+import unittest.mock
 from unittest.mock import Mock
 
 from company.store import TaskStore
@@ -56,3 +57,65 @@ class TelegramIntakeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TelegramApprovalTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = TaskStore(Path(self.tmp.name) / "approvals.db")
+        self.bot = TelegramIntake(token="t", allowed_chat_ids=["12345"], store=self.store)
+        self.bot.send_message = Mock()
+        self.bot._api = Mock(return_value={})
+        self.item = self.store.create_approval_request(
+            "publish_product", {"product_id": "prd-1", "sha256": "ab" * 32}, "factory")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def cb(self, code, sender=12345, chat=12345, approval_id=None):
+        return {"callback_query": {"id": "cb1", "from": {"id": sender}, "message": {"chat": {"id": chat}},
+                                   "data": f"apv:{code}:{approval_id or self.item['approval_id']}"}}
+
+    def test_one_tap_approve_records_decision_and_is_still_consumable_once(self):
+        self.assertTrue(self.bot.handle_update(self.cb("ok")))
+        self.assertEqual(self.store.get_approval_request(self.item["approval_id"])["status"], "approved")
+        scope = {"product_id": "prd-1", "sha256": "ab" * 32}
+        self.store.consume_approval_request(self.item["approval_id"], "publish_product", scope)
+        with self.assertRaises(ValueError):
+            self.store.consume_approval_request(self.item["approval_id"], "publish_product", scope)
+
+    def test_reject_and_double_tap(self):
+        self.bot.handle_update(self.cb("no"))
+        self.assertEqual(self.store.get_approval_request(self.item["approval_id"])["status"], "rejected")
+        self.bot.handle_update(self.cb("ok"))  # second tap must not flip the decision
+        self.assertEqual(self.store.get_approval_request(self.item["approval_id"])["status"], "rejected")
+
+    def test_unauthorized_sender_or_chat_is_ignored(self):
+        self.assertFalse(self.bot.handle_update(self.cb("ok", sender=999)))
+        self.assertFalse(self.bot.handle_update(self.cb("ok", chat=999)))
+        self.assertEqual(self.store.get_approval_request(self.item["approval_id"])["status"], "pending")
+
+    def test_malformed_callback_data_changes_nothing(self):
+        for data in ("apv:ok:not-an-approval", "x:ok:approval-1", "apv:maybe:approval-1"):
+            update = {"callback_query": {"id": "c", "from": {"id": 12345},
+                                         "message": {"chat": {"id": 12345}}, "data": data}}
+            self.bot.handle_update(update)
+        self.assertEqual(self.store.get_approval_request(self.item["approval_id"])["status"], "pending")
+
+    def test_approvals_command_lists_pending_with_buttons(self):
+        self.bot.handle_update({"message": {"chat": {"id": 12345}, "text": "/approvals"}})
+        payload = self.bot._api.call_args.args[1]
+        self.assertIn("reply_markup", payload)
+        self.assertIn(self.item["approval_id"], payload["reply_markup"])
+
+    def test_notify_message_has_buttons_and_redacts_scope(self):
+        from company.notifier import notify_approval_request
+        sent = []
+        with unittest.mock.patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "t", "TELEGRAM_OWNER_CHAT_ID": "12345"}):
+            ok = notify_approval_request(
+                {**self.item, "scope_json": {"note": "ali@example.com"}},
+                sender=lambda token, chat, text, markup=None: sent.append((text, markup)) or True)
+        self.assertTrue(ok)
+        text, markup = sent[0]
+        self.assertNotIn("ali@example.com", text)
+        self.assertEqual(len(markup["inline_keyboard"][0]), 2)

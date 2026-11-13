@@ -23,6 +23,7 @@ jobs:
         id: health
         env:
           READY_URL: https://ai-company-ferd.onrender.com/readyz
+          ACTIONS_WORKER_SECRETS_PRESENT: ${{ secrets.SUPABASE_URL != '' && secrets.SUPABASE_ANON_KEY != '' && secrets.SUPABASE_DB_GATE_KEY != '' && (secrets.GEMINI_API_KEY != '' || secrets.GROQ_API_KEY != '') }}
         run: |
           python - <<'PY'
           import json, os, sys, urllib.request
@@ -36,15 +37,18 @@ jobs:
           database = data.get("database") or {}
           worker = data.get("worker") or {}
           services = data.get("services") or {}
+          embedded_worker = worker.get("enabled") is True
+          actions_worker_configured = os.getenv("ACTIONS_WORKER_SECRETS_PRESENT", "").lower() == "true"
+          worker_ok = worker.get("running") is True if embedded_worker else actions_worker_configured
+          provider_ok = provider.get("ready") is True and any(
+              provider.get(name) is True for name in ("gemini", "groq", "ollama")
+          )
           checks = {
               "API": data.get("ok") is True,
               "14 agents": data.get("agents") == 14,
-              "Gemini primary configured": provider.get("gemini") is True,
-              "Groq fallback configured": provider.get("groq") is True,
-              "AI provider ready": provider.get("ready") is True,
+              "At least one AI provider configured": provider_ok,
               "Supabase connected": database.get("backend") == "supabase" and database.get("connected") is True and database.get("error") is None,
-              "Worker enabled": worker.get("enabled") is True,
-              "Worker running": worker.get("running") is True,
+              "Single worker consumer configured": worker_ok,
               "Analysis-only safety": data.get("mode") == "analysis_only" and data.get("external_actions_enabled") is False,
           }
           failed = [name for name, ok in checks.items() if not ok]
@@ -55,7 +59,8 @@ jobs:
               f"Gemini: {'ready' if provider.get('ready') and provider.get('gemini') else 'not ready'} ({provider.get('model', 'unknown')})",
               f"Groq fallback configured: {bool(provider.get('groq'))}",
               f"Database: {database.get('backend', 'unknown')} / {'connected' if database.get('connected') else 'disconnected'}",
-              f"Worker: {'running' if worker.get('running') else 'stopped'}; restarts={worker.get('restart_count', 0)}",
+              f"Worker mode: {'embedded Render' if embedded_worker else 'GitHub Actions scheduled'}",
+              f"Worker status: {'running' if worker.get('running') else ('Actions secrets configured' if actions_worker_configured else 'not configured')}; restarts={worker.get('restart_count', 0)}",
               f"Worker last restart: {worker.get('last_restart_at') or 'none recorded'}",
               f"Mail loop: {'running' if (services.get('mail') or {}).get('running') else 'not running'}",
               f"Safety mode: {data.get('mode', 'unknown')}; external actions={data.get('external_actions_enabled')}",

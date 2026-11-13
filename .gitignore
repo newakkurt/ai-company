@@ -15,3 +15,5 @@ data/company.db
 data/company.db-shm
 data/company.db-wal
 .DS_Store
+data/human_review.db*
+data/traces/

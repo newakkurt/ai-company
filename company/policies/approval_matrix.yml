@@ -11,3 +11,4 @@ actions:
   change_network_device: {approval: true}
   delete_user_data: {approval: true}
   publish_product: {approval: true}
+  run_shell_command: {approval: true}

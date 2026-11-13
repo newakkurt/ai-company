@@ -17,6 +17,8 @@ from .source_verification import verify_public_source
 from .notifier import notify_owner, notify_task_failed, notify_task_result
 from .scheduler import seed_due_tasks
 from .store import TaskStore
+from .harness.state_machine import safe_record
+from .harness.routing import PrivacyRoutingError
 
 REQUIRED_ENV = (
     "SUPABASE_URL",
@@ -59,6 +61,41 @@ def run_supervised(stop_event=None, poll_seconds: int = 15,
             )
             stop_event.wait(backoff)
             backoff = min(max_backoff_seconds, backoff * 2)
+
+
+def _escalate_to_human(task_id: str, reason: str, error_type: str, review_id: str | None = None):
+    """Persist review-required work and append its escalation to the trace."""
+    try:
+        from .harness.escalation import HumanReviewQueue
+        if review_id is None:
+            review_id = HumanReviewQueue().enqueue(task_id, reason, {"error_type": error_type})
+        safe_record(task_id, "failed", "escalated", reason, review_id=review_id)
+        print(f"agent_worker: escalated to human; task_id={task_id}; review_id={review_id}", flush=True)
+    except Exception as exc:  # noqa: BLE001 - escalation is best-effort and must not mask the failure
+        print(f"agent_worker: escalation failed; error_type={type(exc).__name__}", flush=True)
+
+
+def _request_publish_approval(store, release: dict):
+    """Ask the owner (one-tap Telegram) to approve publishing this exact build.
+
+    Scope equals what POST /api/factory/products/{id}/publish consumes
+    ({product_id, sha256}), so the approval cannot be reused for another file.
+    Best-effort: failure here never fails the task; the owner can still create it via the API.
+    """
+    try:
+        from .notifier import notify_approval_request
+        approval = store.create_approval_request(
+            "publish_product", {"product_id": release["product_id"], "sha256": release["checksum"]},
+            "product_factory", 72)
+        qa = release.get("qa") or {}
+        notify_approval_request(approval, extra=(
+            f"Ürün: {release.get('name')} v{release.get('version')}\n"
+            f"QA: sözdizimi={qa.get('syntax_parse')}, çalışma testi={qa.get('runtime_tests')}, "
+            f"güvenlik={qa.get('security')}\n"
+            "⚠️ Üretilen kod çalıştırılmadı; izole ortamda test edilmeden onaylamanız önerilmez."))
+        print(f"agent_worker: publish approval requested; product_id={release['product_id']}", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"agent_worker: publish approval request failed; error_type={type(exc).__name__}", flush=True)
 
 
 def _safe_notify(func, *args):
@@ -133,6 +170,7 @@ def process_one_task(store=None, provider=None):
         return {"status": "idle"}
 
     print(f"agent_worker: claimed task {task_id}", flush=True)
+    safe_record(task_id, "planned", "running", "worker_claim", mode="analysis_only")
     heartbeat_stop, heartbeat_thread = _start_task_heartbeat(store, task_id)
     try:
         results = run_task(task_id, store=store, provider=provider)
@@ -189,6 +227,7 @@ def process_one_task(store=None, provider=None):
             )
             with open(release["download_path"], "rb") as artifact_file:
                 store.save_product_release(release, artifact_file.read())
+            _request_publish_approval(store, release)
             store.record_agent_output(
                 task_id, "product_factory",
                 "Generated durable release metadata (source not executed):\n"
@@ -199,6 +238,7 @@ def process_one_task(store=None, provider=None):
             )
             results.append({"agent_id": "product_factory", "output": json.dumps(release, ensure_ascii=False)})
         store.complete_task(task_id, output_count=len(results))
+        safe_record(task_id, "running", "completed", "all_agents_saved", output_count=len(results))
         print(
             f"agent_worker: completed task {task_id}; "
             f"persisted_outputs={len(results)}",
@@ -212,6 +252,13 @@ def process_one_task(store=None, provider=None):
             "output_count": len(results),
         }
     except Exception as exc:
+        safe_record(task_id, "running", "failed", "exception", error_type=type(exc).__name__)
+        if isinstance(exc, PrivacyRoutingError):
+            _escalate_to_human(task_id, "privacy_routing_blocked", type(exc).__name__)
+        else:
+            review_id = getattr(exc, "human_review_id", None) or getattr(exc, "review_id", None)
+            if review_id:
+                _escalate_to_human(task_id, "human_review_required", type(exc).__name__, review_id=review_id)
         # Only log the exception class. Never emit provider responses or credentials.
         try:
             store.fail_task(

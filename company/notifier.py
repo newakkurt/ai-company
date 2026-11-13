@@ -23,11 +23,12 @@ def owner_chat_id() -> str:
     return allowed[0] if allowed else ""
 
 
-def _post(token: str, chat_id: str, text: str) -> bool:
+def _post(token: str, chat_id: str, text: str, reply_markup: dict | None = None) -> bool:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    body = urlencode({
-        "chat_id": chat_id, "text": text, "disable_web_page_preview": "true",
-    }).encode()
+    fields = {"chat_id": chat_id, "text": text, "disable_web_page_preview": "true"}
+    if reply_markup:
+        fields["reply_markup"] = json.dumps(reply_markup)
+    body = urlencode(fields).encode()
     request = Request(url, data=body, headers={"Content-Type": "application/x-www-form-urlencoded"})
     with urlopen(request, timeout=15) as response:
         return bool(json.loads(response.read().decode("utf-8")).get("ok"))
@@ -37,7 +38,7 @@ def notifier_configured() -> bool:
     return bool(os.getenv("TELEGRAM_BOT_TOKEN", "").strip() and owner_chat_id())
 
 
-def notify_owner(text: str, sender=None) -> bool:
+def notify_owner(text: str, sender=None, reply_markup: dict | None = None) -> bool:
     """Send a message to the owner. Returns False instead of raising."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = owner_chat_id()
@@ -45,6 +46,8 @@ def notify_owner(text: str, sender=None) -> bool:
     if not token or not chat_id or not text:
         return False
     try:
+        if reply_markup:
+            return bool((sender or _post)(token, chat_id, text[:MAX_LEN], reply_markup))
         return bool((sender or _post)(token, chat_id, text[:MAX_LEN]))
     except Exception as exc:  # noqa: BLE001 - never leak URL/token via exception text
         print(f"notifier: send failed; error_type={type(exc).__name__}", flush=True)
@@ -109,3 +112,33 @@ def notify_task_result(task: dict, sender=None) -> bool:
 
 def notify_task_failed(task_id: str, error_type: str, sender=None) -> bool:
     return notify_owner(f"❌ Görev başarısız: {task_id}\nHata türü: {error_type}", sender=sender)
+
+
+def format_approval_message(approval: dict) -> str:
+    """Owner-facing summary of ONE scoped approval. Scope is redacted and trimmed."""
+    from .harness.privacy import redact
+    scope = redact(json.dumps(approval.get("scope_json") or {}, ensure_ascii=False, sort_keys=True))[0]
+    return (
+        "🔐 Onay bekliyor\n"
+        f"İşlem: {approval.get('action')}\n"
+        f"Kapsam: {scope[:900]}\n"
+        f"Talep eden: {approval.get('requested_by')}\n"
+        f"Geçerlilik: {approval.get('expires_at')}\n\n"
+        "Onay yalnızca bu tek işlem ve kapsam için geçerlidir; tek kullanımlıktır."
+    )
+
+
+def approval_keyboard(approval_id: str) -> dict:
+    return {"inline_keyboard": [[
+        {"text": "✅ Onayla", "callback_data": f"apv:ok:{approval_id}"},
+        {"text": "❌ Reddet", "callback_data": f"apv:no:{approval_id}"},
+    ]]}
+
+
+def notify_approval_request(approval: dict, sender=None, extra: str = "") -> bool:
+    """Send an approval request with one-tap Approve/Reject buttons (best-effort)."""
+    if not approval or not approval.get("approval_id"):
+        return False
+    text = format_approval_message(approval) + (("\n\n" + extra.strip()) if extra.strip() else "")
+    return notify_owner(text, sender=sender,
+                        reply_markup=approval_keyboard(approval["approval_id"]))

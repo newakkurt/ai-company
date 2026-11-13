@@ -22,6 +22,7 @@ jobs:
       - name: Verify hosted AI Company readiness
         env:
           READY_URL: https://ai-company-ferd.onrender.com/readyz
+          ACTIONS_WORKER_SECRETS_PRESENT: ${{ secrets.SUPABASE_URL != '' && secrets.SUPABASE_ANON_KEY != '' && secrets.SUPABASE_DB_GATE_KEY != '' && (secrets.GEMINI_API_KEY != '' || secrets.GROQ_API_KEY != '') }}
         run: |
           python - <<'PY'
           import json
@@ -60,12 +61,16 @@ jobs:
                   provider = data.get("provider") or {}
                   database = data.get("database") or {}
                   worker = data.get("worker") or {}
-                  if worker.get("enabled") is not True:
-                      problems.append("worker.enabled is not true")
-                  if worker.get("running") is not True:
-                      problems.append("worker.running is not true")
-                  if provider.get("groq") is not True:
-                      problems.append("provider.groq fallback is not configured")
+                  # Exactly one queue consumer owns execution: embedded Render or
+                  # the scheduled GitHub Actions agent-worker.yml workflow.
+                  # A disabled embedded worker is expected in Actions mode.
+                  embedded_worker = worker.get("enabled") is True
+                  actions_worker_configured = os.getenv("ACTIONS_WORKER_SECRETS_PRESENT", "").lower() == "true"
+                  worker_ok = worker.get("running") is True if embedded_worker else actions_worker_configured
+                  if not worker_ok:
+                      problems.append("no healthy single worker consumer is configured")
+                  if not any(provider.get(name) is True for name in ("gemini", "groq", "ollama")):
+                      problems.append("no AI provider is configured")
                   if not isinstance(provider.get("model"), str) or not provider["model"].strip():
                       problems.append("provider.model is missing")
                   if provider.get("ready") is not True:
@@ -88,6 +93,10 @@ jobs:
                           "database_backend": database["backend"],
                           "mode": data["mode"],
                           "worker": worker,
+                          "worker_mode": (
+                              "embedded_render" if embedded_worker
+                              else "github_actions_schedule"
+                          ),
                           "external_actions_enabled": data["external_actions_enabled"],
                       }, ensure_ascii=False))
                       sys.exit(0)
