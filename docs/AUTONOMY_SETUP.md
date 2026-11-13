@@ -14,15 +14,16 @@ Bu sistem görevleri otomatik üretir ve araştırma/analiz/ürün taslağı iş
 
 ## Worker seçimi
 
-Varsayılan tercih GitHub Actions scheduled worker'dır:
+Aktif tercih GitHub Actions scheduled worker'dır:
 - `.github/workflows/agent-worker.yml` her 5 dakikada bir çalışır.
-- Her çalışmada en fazla bir task işler.
-- Gerekli repository secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY` ve `GEMINI_API_KEY` veya `GROQ_API_KEY`.
-- Secrets yoksa workflow güvenli şekilde durur; değerleri loglamaz.
+- Her çalışmada en fazla bir task işler; GitHub concurrency aynı workflow çalıştırmalarını sıraya alır.
+- Repository secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY`, `GROQ_API_KEY` (Gemini opsiyoneldir).
+- Son doğrulanan Actions ortamında Groq anahtarı mevcut, Gemini anahtarı boştu; bu yüzden worker Groq'u doğrudan seçer.
+- Render web servisi `AI_COMPANY_EMBEDDED_WORKER=false` ile API/dashboard olarak kalır.
 
-Render embedded worker opsiyoneldir:
-- `AI_COMPANY_EMBEDDED_WORKER=true) yapılırsa Render web servisi worker başlatır.
-- GitHub Actions schedule aynı anda açıksa iki consumer farklı işleri paralel işleyebilir; ücretsiz model kotalarını zorlayabilir. Tek consumer tercih et.
+Render embedded worker yalnızca bilinçli geçişte kullanılmalıdır:
+- `AI_COMPANY_EMBEDDED_WORKER=true` Render üzerinde ikinci consumer başlatır.
+- Bu moda geçmeden önce GitHub Actions schedule kapatılmalı; iki consumer aynı anda açılmamalıdır.
 - Render Free uyur/yeniden başlar; kesintisiz 7/24 garantisi vermez.
 - Uzun LLM çağrılarında worker task heartbeat gönderir; 15 dakikalık stale lease yalnızca worker gerçekten durmuşsa devreye girmelidir.
 
