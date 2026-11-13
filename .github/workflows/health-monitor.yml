@@ -60,11 +60,12 @@ jobs:
                   provider = data.get("provider") or {}
                   database = data.get("database") or {}
                   worker = data.get("worker") or {}
-                  if worker.get("enabled") is not True:
-                      problems.append("worker.enabled is not true")
-                  if worker.get("running") is not True:
-                      problems.append("worker.running is not true")
-                  if provider.get("gemini") is not True and provider.get("groq") is not True:
+                  # Exactly one queue consumer owns execution: embedded Render or
+                  # the scheduled GitHub Actions agent-worker.yml workflow.
+                  # A disabled embedded worker is expected in Actions mode.
+                  if worker.get("enabled") is True and worker.get("running") is not True:
+                      problems.append("embedded worker is enabled but not running")
+                  if not any(provider.get(name) is True for name in ("gemini", "groq", "ollama")):
                       problems.append("no AI provider is configured")
                   if not isinstance(provider.get("model"), str) or not provider["model"].strip():
                       problems.append("provider.model is missing")
@@ -88,6 +89,10 @@ jobs:
                           "database_backend": database["backend"],
                           "mode": data["mode"],
                           "worker": worker,
+                          "worker_mode": (
+                              "embedded_render" if worker.get("enabled") is True
+                              else "github_actions_schedule_expected"
+                          ),
                           "external_actions_enabled": data["external_actions_enabled"],
                       }, ensure_ascii=False))
                       sys.exit(0)
