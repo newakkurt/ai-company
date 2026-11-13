@@ -31,6 +31,28 @@ class SupabaseTaskStoreTests(unittest.TestCase):
         self.addCleanup(self.env.stop)
         self.store = SupabaseTaskStore()
 
+    def test_supabase_url_must_be_project_origin(self):
+        for invalid in (
+            "http://example.supabase.co",
+            "https://example.supabase.co/rest/v1",
+            "https://example.supabase.co/tasks",
+            "https://example.supabase.co?apikey=secret",
+        ):
+            with self.subTest(url=invalid):
+                with patch.dict(os.environ, {"SUPABASE_URL": invalid}):
+                    with self.assertRaisesRegex(ValueError, "project origin only"):
+                        SupabaseTaskStore()
+
+    @patch("company.store.urlopen")
+    def test_request_uses_origin_plus_postgrest_path(self, mocked_urlopen):
+        mocked_urlopen.return_value = FakeResponse([])
+        self.store._request("tasks", params={"select": "task_id"})
+        request = mocked_urlopen.call_args.args[0]
+        self.assertEqual(
+            request.full_url.split("?")[0],
+            "https://example.supabase.co/rest/v1/tasks",
+        )
+
     @patch("company.store.urlopen")
     def test_request_sends_server_gate_header(self, mocked_urlopen):
         mocked_urlopen.return_value = FakeResponse([{"task_id": "task-1"}])
