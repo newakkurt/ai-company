@@ -88,7 +88,8 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
             f"{specialist_context}"
         )
         print(f"agent_worker: requesting agent={agent.id} task={task_id}", flush=True)
-        from .harness.runtime import generate_with_context\n        output = _checkpoint(generate_with_context(provider, agent, build_system_prompt(agent), prompt))
+        from .harness.runtime import generate_with_context
+        output = _checkpoint(generate_with_context(provider, agent, build_system_prompt(agent), prompt))
         store.record_agent_output(task_id, agent.id, output)
         print(f"agent_worker: saved agent={agent.id} task={task_id}", flush=True)
         results.append({"agent_id": agent.id, "output": output})
