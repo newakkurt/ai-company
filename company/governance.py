@@ -98,14 +98,14 @@ def local_model_configured(env: Mapping[str, str] | None = None) -> bool:
     source = os.environ if env is None else env
     return bool(source.get("OLLAMA_BASE_URL") and source.get("AI_COMPANY_LOCAL_MODEL"))
 
-def cloud_route_allowed(classification: Classification, env: Mapping[str, str] | None = None) -> bool:
+def cloud_route_allowed(classification: Classification, env: Mapping[str, str] | None = None, provider_available: bool = False) -> bool:
     # Cloud is never an allowed route for confidential/restricted task descriptions.
     if classification.level != "public":
         return False
     source = os.environ if env is None else env
-    return bool(source.get("GEMINI_API_KEY") or source.get("GROQ_API_KEY"))
+    return provider_available or bool(source.get("GEMINI_API_KEY") or source.get("GROQ_API_KEY"))
 
-def require_safe_model_route(text: str, env: Mapping[str, str] | None = None) -> str:
+def require_safe_model_route(text: str, env: Mapping[str, str] | None = None, provider_available: bool = False) -> str:
     classification = classify_task(text)
     if classification.level != "public":
         if local_model_configured(env):
@@ -113,7 +113,7 @@ def require_safe_model_route(text: str, env: Mapping[str, str] | None = None) ->
             # silently sending sensitive data to Gemini/Groq.
             raise GovernanceError("local_model_adapter_not_implemented")
         raise GovernanceError("sensitive_task_blocked_from_cloud")
-    if not cloud_route_allowed(classification, env):
+    if not cloud_route_allowed(classification, env, provider_available):
         raise GovernanceError("no_allowed_model_provider")
     return "cloud_general"
 
@@ -138,6 +138,14 @@ def require_human_approval(action: str) -> None:
 
 def governance_snapshot(env: Mapping[str, str] | None = None) -> dict:
     source = os.environ if env is None else env
+    try:
+        daily_task_limit = max(1, int(source.get("AI_COMPANY_DAILY_TASK_LIMIT", "20")))
+    except (TypeError, ValueError):
+        daily_task_limit = 20
+    try:
+        monthly_spend_limit = max(0.0, float(source.get("AI_COMPANY_MONTHLY_SPEND_LIMIT_USD", "0")))
+    except (TypeError, ValueError):
+        monthly_spend_limit = 0.0
     return {
         "kill_switch": kill_switch_enabled(source),
         "max_total_attempts": MAX_TOTAL_ATTEMPTS,
@@ -152,9 +160,9 @@ def governance_snapshot(env: Mapping[str, str] | None = None) -> dict:
             "allowed_for": "public_non_sensitive_tasks_only",
         },
         "budget": {
-            "daily_task_limit": int(source.get("AI_COMPANY_DAILY_TASK_LIMIT", "20")),
-            "monthly_spend_limit_usd": float(source.get("AI_COMPANY_MONTHLY_SPEND_LIMIT_USD", "0")),
-            "enforcement": "not_yet_metered",
+            "daily_task_limit": daily_task_limit,
+            "monthly_spend_limit_usd": monthly_spend_limit,
+            "enforcement": "daily_task_count_only; provider_spend_not_metered",
         },
         "external_actions": "human_approval_required",
         "capability_policy": "deny_by_default",
