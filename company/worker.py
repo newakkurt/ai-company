@@ -283,6 +283,9 @@ def run_forever(stop_event=None, poll_seconds: int = 15):
     last_seed = 0.0
     last_followup_check = 0.0
     while not stop_event.is_set():
+        if kill_switch_enabled():
+            stop_event.wait(poll_seconds)
+            continue
         if time.monotonic() - last_seed >= SEED_INTERVAL_SECONDS:
             last_seed = time.monotonic()
             try:
@@ -330,6 +333,9 @@ def main():
         parser.error("--poll-seconds must be at least 5")
 
     if args.once:
+        if kill_switch_enabled():
+            print("agent_worker: kill switch enabled; no task processed", flush=True)
+            return 0
         store = TaskStore()
         try:
             seed_due_tasks(store)
