@@ -64,8 +64,8 @@ jobs:
                       problems.append("worker.enabled is not true")
                   if worker.get("running") is not True:
                       problems.append("worker.running is not true")
-                  if provider.get("groq") is not True:
-                      problems.append("provider.groq fallback is not configured")
+                  if provider.get("gemini") is not True and provider.get("groq") is not True:
+                      problems.append("no AI provider is configured")
                   if not isinstance(provider.get("model"), str) or not provider["model"].strip():
                       problems.append("provider.model is missing")
                   if provider.get("ready") is not True:
