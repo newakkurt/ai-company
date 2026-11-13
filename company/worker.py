@@ -363,6 +363,19 @@ def main():
     if args.once:
         store = TaskStore()
         try:
+            from .crm import verify_unchecked_companies
+            checked = verify_unchecked_companies(store=store, limit=2)
+            if checked:
+                print(
+                    "crm: source verification batch completed; "
+                    f"checked={len(checked)} statuses="
+                    + ",".join(item["source_validation_status"] for item in checked),
+                    flush=True,
+                )
+        except Exception as exc:  # noqa: BLE001 - source checks must not block queue work
+            print(f"crm: source verification batch skipped; error_type={type(exc).__name__}",
+                  file=sys.stderr, flush=True)
+        try:
             seed_due_tasks(store)
         except Exception as exc:  # noqa: BLE001
             print(f"agent_worker: scheduler failed; error_type={type(exc).__name__}", file=sys.stderr, flush=True)
