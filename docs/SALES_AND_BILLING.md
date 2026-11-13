@@ -68,13 +68,13 @@ Use a dedicated support mailbox and configure:
 
 ## Current verified state (2026-11-13)
 
-Live Supabase inspection found:
+Live Supabase, Render and GitHub Actions inspection found:
 
-- One product release: **NetCmd ConfigGuard Lite 1.0.0**, status `review_required`.
-- No pending product approval, payment event, payment ledger entry, entitlement or download token.
-- The stored artifact SHA-256 matches the actual decoded artifact bytes. However, the QA manifest's `qa_downloadable_file_sha256` differs from the stored artifact SHA-256. Keep the release unpublished until the exact stored ZIP is re-tested and its QA manifest is reconciled.
-- CRM contains 16 company candidates, all still in `new`; all 16 source records are `not_checked`. There are no CRM contacts or sales activities.
-- The 15 dead-lettered tasks inspected were Gemini HTTP 429 / `RESOURCE_EXHAUSTED` quota failures. Gemini is configured, but its current quota is exhausted; Groq fallback is not configured.
-- No real paid customer journey, BMC webhook purchase, SMTP delivery or bank payout reconciliation has been demonstrated.
+- One product release: **NetCmd ConfigGuard Lite 1.0.0**, status `review_required`; the persisted ZIP SHA-256 now matches the download checksum metadata. Runtime ZIP QA and owner publication approval are still pending.
+- No payment event, payment ledger entry, membership, entitlement, bank settlement or proven buyer delivery.
+- CRM contains 16 company candidates, all still in `new`: 10 source pages are `reachable_match`, 2 `reachable_no_match`, 2 `too_large`, and 2 `unreachable`. A reachable match is not human identity/legal approval; no candidate is automatically qualified.
+- The historical dead-letter queue contains 15 quota-failed tasks. Render's embedded worker is disabled; GitHub Actions is the sole worker and selects Groq directly. A real CEO-agent smoke task completed and persisted output. Two new SEO/email recovery drafts are queued.
+- `/readyz` currently reports BMC webhook secret, Shop item map, membership level/product map, SMTP and Telegram owner notifications as not configured. Mail mode remains `draft`.
+- Python tests pass on 3.10, 3.11 and 3.12; Supabase security advisor reports zero lints. The 10 foreign-key index and 12 RLS policy performance warnings have been addressed.
 
-The code path is implemented and unit-tested, but these live data and provider blockers mean the product is **not yet approved for sale**. Do not create fake payments, contacts, source verification or revenue to make the dashboard appear complete.
+The software pipeline is running, but the business is **not yet approved for sale**. The owner must supply real BMC membership/webhook values and the Shop item-to-product mapping; dedicated SMTP must be configured for automatic delivery. Do not create fake payments, contacts, source verification or revenue to make the dashboard appear complete.
