@@ -4,6 +4,7 @@ from unittest.mock import patch
 from company.crm import (
     score_company, norm_name, record_mail, suppress_contact, is_suppressed,
     verify_company, update_company_stage, create_offer, list_companies,
+    verify_unchecked_companies,
 )
 
 class FakeStore:
@@ -34,6 +35,45 @@ class FakeStore:
         return []
 
 class CRMTests(unittest.TestCase):
+    def test_unchecked_company_sources_are_checked_without_human_verification(self):
+        class BackfillStore:
+            def __init__(self):
+                self.rows = [{
+                    "company_id": "co-backfill",
+                    "company_name": "Acme Networks",
+                    "source_url": "https://acme.example/about",
+                    "source_validation_status": "not_checked",
+                }]
+                self.updated = None
+
+            def _request(self, table, method="GET", params=None, body=None, prefer=None):
+                params = params or {}
+                if method == "GET" and table == "crm_companies":
+                    return [dict(row) for row in self.rows
+                            if row["source_validation_status"] == params.get("source_validation_status", "eq.not_checked").removeprefix("eq.")]
+                if method == "PATCH" and table == "crm_companies":
+                    self.updated = (params, body)
+                    self.rows[0].update(body or {})
+                    return []
+                return []
+
+        store = BackfillStore()
+        evidence = {
+            "source_validation_status": "reachable_match",
+            "source_http_status": 200,
+            "source_page_title": "Acme Networks",
+            "source_checked_at": "2026-11-13T00:00:00+00:00",
+            "source_validation_note": "HTTP 200; company-name token found in page text.",
+        }
+        with patch("company.source_verification.verify_public_source", return_value=evidence) as verify:
+            checked = verify_unchecked_companies(store=store, limit=2)
+        self.assertEqual(checked, [{"company_id": "co-backfill", "source_validation_status": "reachable_match"}])
+        verify.assert_called_once_with("https://acme.example/about", "Acme Networks")
+        self.assertEqual(store.updated[0], {"company_id": "eq.co-backfill"})
+        self.assertNotIn("source_type", store.updated[1])
+        self.assertEqual(store.rows[0]["source_validation_status"], "reachable_match")
+
+
     def test_name_normalization(self):
         self.assertEqual(norm_name("ACME Ltd. & Co."),"acme ltd co")
     def test_score_is_bounded_and_explainable(self):
