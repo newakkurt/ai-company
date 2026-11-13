@@ -226,7 +226,7 @@ class Outcome:
 
 
 def run_with_retries(func, *, task_id: str, description: str = "", queue: HumanReviewQueue | None = None,
-                     max_attempts: int = MAX_ATTEMPTS, verify=None, sleeper=None) -> Outcome:
+                     max_attempts: int = MAX_ATTEMPTS, verify=None, sleeper=None,\n                     raise_last_exception: bool = False) -> Outcome:
     """Run *func* at most *max_attempts* (hard cap 3) times, verifying each result.
 
     High-risk/subjective work is escalated before the first attempt; exhausted work
@@ -258,4 +258,6 @@ def run_with_retries(func, *, task_id: str, description: str = "", queue: HumanR
             sleeper(min(2 ** attempt, 30))
     review_id = queue.enqueue(task_id, "retry_budget_exhausted",
                               {"description": description[:500], "errors": errors}, [], max_attempts)
+    if raise_last_exception and last_exception is not None:
+        raise last_exception
     return Outcome("escalated", None, max_attempts, errors, review_id, last_exception)
