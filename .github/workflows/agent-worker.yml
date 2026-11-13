@@ -1,5 +1,6 @@
 name: Continuous AI Agent Worker
 
+# One bounded analysis-only task per run; manual dispatch is available for owner-triggered recovery.
 on:
   workflow_dispatch:
   push:
