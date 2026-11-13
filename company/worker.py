@@ -162,6 +162,8 @@ def process_one_task(store=None, provider=None):
     try:
         try:
             results = run_task(task_id, store=store, provider=provider)
+        except GovernanceError:
+            raise
         except Exception:
             _PROVIDER_BREAKER.record_failure()
             raise
@@ -241,6 +243,10 @@ def process_one_task(store=None, provider=None):
             "task_id": task_id,
             "output_count": len(results),
         }
+    except GovernanceError as exc:
+        block_claimed_task(store, task_id, str(exc))
+        print(f"agent_worker: blocked task {task_id}; reason={str(exc)}", flush=True)
+        return {"status": "blocked", "task_id": task_id, "reason": str(exc)}
     except Exception as exc:
         # Only log the exception class. Never emit provider responses or credentials.
         try:
@@ -293,7 +299,7 @@ def run_forever(stop_event=None, poll_seconds: int = 15):
                       file=sys.stderr, flush=True)
         try:
             result = process_one_task(store=store)
-            if result["status"] in {"idle", "failed"}:
+            if result["status"] in {"idle", "failed", "blocked", "paused"}:
                 stop_event.wait(poll_seconds)
         except Exception as exc:
             print(
