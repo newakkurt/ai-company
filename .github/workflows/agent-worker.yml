@@ -1,6 +1,7 @@
 name: Continuous AI Agent Worker
 
 # One bounded analysis-only task per run; manual dispatch is available for owner-triggered recovery.
+# Content tasks use the content_communications artifact-delivery prompt.
 on:
   workflow_dispatch:
   push:
