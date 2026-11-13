@@ -7,6 +7,7 @@ from company.llm import (
     FallbackProvider,
     GeminiAPIError,
     GeminiProvider,
+    GroqAPIError,
     GroqProvider,
     _get_cloud_provider,
 )
@@ -46,6 +47,19 @@ class GeminiProviderTests(unittest.TestCase):
         self.assertEqual(sent_request.get_header("Authorization"), "Bearer groq-test-key")
         self.assertNotIn("groq-test-key", sent_request.full_url)
         self.assertEqual(request.call_args.kwargs["timeout"], 45)
+
+
+    def test_groq_http_error_exposes_status_and_safe_provider_message(self):
+        response = io.BytesIO(b'{"error":{"message":"Invalid API Key"}}')
+        error = HTTPError(
+            GroqProvider.ENDPOINT, 401, "Unauthorized", {}, response
+        )
+        with patch("company.llm.urlopen", side_effect=error):
+            with self.assertRaises(GroqAPIError) as raised:
+                GroqProvider(api_key="groq-test-secret").generate("system", "user")
+        self.assertIn("HTTP 401", str(raised.exception))
+        self.assertIn("Invalid API Key", str(raised.exception))
+        self.assertNotIn("groq-test-secret", str(raised.exception))
 
     def test_fallback_uses_groq_when_gemini_quota_is_exhausted(self):
         class Primary:
