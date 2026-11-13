@@ -16,7 +16,7 @@ Bu sistem görevleri otomatik üretir ve araştırma/analiz/ürün taslağı iş
 
 Aktif tercih GitHub Actions scheduled worker'dır:
 - `.github/workflows/agent-worker.yml` her 5 dakikada bir çalışır.
-- Her çalışmada en fazla bir task işler; GitHub concurrency aynı workflow çalıştırmalarını sıraya alır. Render embedded worker kapalıdır; ikinci consumer yoktur.
+- Her çalışmada en fazla bir task işler; GitHub concurrency aynı workflow çalıştırmalarını sıraya alır. GitHub Actions ekranında `Run workflow` ile manuel tetikleme de vardır. Render embedded worker kapalıdır; ikinci consumer yoktur.
 - Repository secrets: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DB_GATE_KEY`, `GROQ_API_KEY` (Gemini opsiyoneldir).
 - Son doğrulanan Actions ortamında Groq doğrudan seçildi (`openai/gpt-oss-20b`); kopyalanan anahtarlardaki boşluk/çift tırnak normalize edilir. CEO agent smoke test'i gerçek çıktı üreterek tamamlandı.
 - Render web servisi `AI_COMPANY_EMBEDDED_WORKER=false` ile API/dashboard olarak kalır.
