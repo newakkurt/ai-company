@@ -35,7 +35,7 @@ _PROVIDER_BREAKER = CircuitBreaker()
 
 def supervisor_status():
     """Safe operational counters for the hosted readiness endpoint."""
-    return dict(_SUPERVISOR_STATE)
+    return {**_SUPERVISOR_STATE, "provider_circuit": _PROVIDER_BREAKER.status()}
 
 
 def run_supervised(stop_event=None, poll_seconds: int = 15,
@@ -152,7 +152,11 @@ def process_one_task(store=None, provider=None):
     print(f"agent_worker: claimed task {task_id}", flush=True)
     heartbeat_stop, heartbeat_thread = _start_task_heartbeat(store, task_id)
     try:
-        results = run_task(task_id, store=store, provider=provider)
+        try:
+            results = run_task(task_id, store=store, provider=provider)
+        except Exception:
+            _PROVIDER_BREAKER.record_failure()
+            raise
         _PROVIDER_BREAKER.record_success()
         # Save research leads only when the model emits the requested JSON block
         # and provides a public HTTPS source. Records remain unverified drafts.
@@ -230,7 +234,6 @@ def process_one_task(store=None, provider=None):
             "output_count": len(results),
         }
     except Exception as exc:
-        _PROVIDER_BREAKER.record_failure()
         # Only log the exception class. Never emit provider responses or credentials.
         try:
             store.fail_task(
