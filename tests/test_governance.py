@@ -3,7 +3,7 @@ import unittest
 from company.governance import (
     CircuitBreaker, GovernanceError, MAX_RETRIES, MAX_TOTAL_ATTEMPTS,
     classify_task, governance_snapshot, kill_switch_enabled,
-    require_safe_model_route,
+    require_safe_model_route, require_agent_profile,
 )
 
 class GovernanceTests(unittest.TestCase):
@@ -45,8 +45,14 @@ class GovernanceTests(unittest.TestCase):
 
     def test_snapshot_does_not_claim_budget_enforcement(self):
         snapshot = governance_snapshot({"AI_COMPANY_MONTHLY_SPEND_LIMIT_USD": "0"})
-        self.assertEqual(snapshot["budget"]["enforcement"], "not_yet_metered")
+        self.assertEqual(snapshot["budget"]["enforcement"], "daily_task_count_only; provider_spend_not_metered")
         self.assertFalse(snapshot["local_model"]["configured"])
+    def test_agent_profiles_are_least_privilege(self):
+        require_agent_profile("software_engineer", ["implementation_plan", "code_review"], ["repository_read"])
+        with self.assertRaises(GovernanceError):
+            require_agent_profile("software_engineer", ["implementation_plan"], ["shell"])
+        with self.assertRaises(GovernanceError):
+            require_agent_profile("unknown_agent", [], [])
 
 if __name__ == "__main__":
     unittest.main()
