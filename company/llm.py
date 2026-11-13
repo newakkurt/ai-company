@@ -224,8 +224,8 @@ class GroqProvider:
                     detail = str(error_object.get("message") or error_object.get("type") or "")
             except (ValueError, TypeError, AttributeError):
                 pass
-            detail = re.sub(r"(?i)bearer\\s+[A-Za-z0-9._~-]+", "Bearer [redacted]", detail)
-            detail = re.sub(r"(?i)(api[_ -]?key\\s*[:=]\\s*)[^\\s,;]+", r"\\1[redacted]", detail)
+            detail = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~-]+", "Bearer [redacted]", detail)
+            detail = re.sub(r"(?i)(api[_ -]?key\s*[:=]\s*)[^\s,;]+", r"\1[redacted]", detail)
             suffix = f"; provider_message={detail[:200]}" if detail else ""
             raise GroqAPIError(f"Groq API returned HTTP {int(exc.code)}{suffix}") from exc
         except (URLError, TimeoutError) as exc:
