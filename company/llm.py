@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_MAX_OUTPUT_TOKENS = 2048   # analysis reports
 GEMINI_MAX_OUTPUT_TOKENS = 65536   # upper bound accepted for Gemini Flash-class models
-GROQ_MAX_OUTPUT_TOKENS = 8000      # conservative cap for llama-3.1-8b-instant
+GROQ_MAX_OUTPUT_TOKENS = 1024      # stay within the free-tier TPM budget for multi-agent tasks
 
 
 def normalize_api_key(value: object) -> str:
@@ -210,47 +210,76 @@ class GroqProvider:
             "max_tokens": clamp_max_tokens(max_tokens, GROQ_MAX_OUTPUT_TOKENS),
             "temperature": 0.2,
         }
-        request = Request(
-            self.ENDPOINT,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "AICompanyWorker/1.0",
-                "Authorization": "Bearer " + self.api_key,
-            },
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            raw_body = exc.read(2048).decode("utf-8", errors="replace").strip()
-            detail = ""
+        body = json.dumps(payload).encode("utf-8")
+        for attempt in range(3):
+            request = Request(
+                self.ENDPOINT,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "AICompanyWorker/1.0",
+                    "Authorization": "Bearer " + self.api_key,
+                },
+                method="POST",
+            )
             try:
-                error_body = json.loads(raw_body)
-                error_object = error_body.get("error") if isinstance(error_body, dict) else None
-                if isinstance(error_object, dict):
-                    detail = str(error_object.get("message") or error_object.get("type") or "")
-                elif isinstance(error_object, str):
-                    detail = error_object
-            except (ValueError, TypeError, AttributeError):
-                detail = raw_body
-            detail = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~-]+", "Bearer [redacted]", detail)
-            detail = re.sub(r"(?i)(api[_ -]?key\s*[:=]\s*)[^\s,;]+", r"\1[redacted]", detail)
-            detail = re.sub(r"gsk_[A-Za-z0-9_-]{12,}", "[redacted]", detail)
-            detail = re.sub(r"\s+", " ", detail).strip()
-            if not detail:
-                content_type = (exc.headers.get("Content-Type", "") if exc.headers else "")[:80]
-                detail = f"reason={str(exc.reason)[:80]}; content_type={content_type}"
-            suffix = f"; provider_message={detail[:180]}" if detail else ""
-            raise GroqAPIError(f"Groq API returned HTTP {int(exc.code)}{suffix}") from exc
-        except (URLError, TimeoutError) as exc:
-            raise GroqAPIError(
-                f"Groq API network request failed ({type(exc).__name__})."
-            ) from exc
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise GroqAPIError("Groq API returned an invalid JSON response.") from exc
+                with urlopen(request, timeout=self.timeout) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                break
+            except HTTPError as exc:
+                raw_body = exc.read(2048).decode("utf-8", errors="replace").strip()
+                detail = ""
+                try:
+                    error_body = json.loads(raw_body)
+                    error_object = error_body.get("error") if isinstance(error_body, dict) else None
+                    if isinstance(error_object, dict):
+                        detail = str(error_object.get("message") or error_object.get("type") or "")
+                    elif isinstance(error_object, str):
+                        detail = error_object
+                except (ValueError, TypeError, AttributeError):
+                    detail = raw_body
+                detail = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~-]+", "Bearer [redacted]", detail)
+                detail = re.sub(r"(?i)(api[_ -]?key\s*[:=]\s*)[^\s,;]+", r"\1[redacted]", detail)
+                detail = re.sub(r"gsk_[A-Za-z0-9_-]{12,}", "[redacted]", detail)
+                detail = re.sub(r"\s+", " ", detail).strip()
+                status = int(exc.code)
+                retry_after = (exc.headers or {}).get("Retry-After", "")
+                is_tpm_limit = any(
+                    marker in detail.lower()
+                    for marker in ("tokens per minute", "requests per minute", "rate limit reached")
+                )
+                if status == 429 and attempt < 2 and (retry_after or is_tpm_limit):
+                    delay = 60
+                    if retry_after:
+                        try:
+                            delay = max(1, min(int(float(retry_after)), 90))
+                        except (TypeError, ValueError):
+                            delay = 60
+                    else:
+                        match = re.search(r"try again in\s+(\d+(?:\.\d+)?)\s*s", detail, re.I)
+                        if match:
+                            delay = max(1, min(int(float(match.group(1)) + 1), 90))
+                    print(
+                        f"agent_worker: Groq rate limit reached; retrying after {delay}s "
+                        f"(attempt={attempt + 1}/3)",
+                        flush=True,
+                    )
+                    time.sleep(delay)
+                    continue
+                if not detail:
+                    content_type = (exc.headers.get("Content-Type", "") if exc.headers else "")[:80]
+                    detail = f"reason={str(exc.reason)[:80]}; content_type={content_type}"
+                suffix = f"; provider_message={detail[:180]}" if detail else ""
+                raise GroqAPIError(f"Groq API returned HTTP {status}{suffix}") from exc
+            except (URLError, TimeoutError) as exc:
+                raise GroqAPIError(
+                    f"Groq API network request failed ({type(exc).__name__})."
+                ) from exc
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise GroqAPIError("Groq API returned an invalid JSON response.") from exc
+        else:
+            raise GroqAPIError("Groq API retry attempts were exhausted.")
 
         choices = data.get("choices") or []
         message = (choices[0].get("message") or {}) if choices else {}
