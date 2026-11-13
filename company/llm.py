@@ -1,6 +1,7 @@
 """Gemini Flash-Lite provider with bounded retries and secret-safe errors."""
 import json
 import os
+import re
 import time
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
@@ -215,7 +216,18 @@ class GroqProvider:
             with urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
-            raise GroqAPIError(f"Groq API returned HTTP {int(exc.code)}") from exc
+            detail = ""
+            try:
+                error_body = json.loads(exc.read(2048).decode("utf-8", errors="replace"))
+                error_object = error_body.get("error") or {}
+                if isinstance(error_object, dict):
+                    detail = str(error_object.get("message") or error_object.get("type") or "")
+            except (ValueError, TypeError, AttributeError):
+                pass
+            detail = re.sub(r"(?i)bearer\\s+[A-Za-z0-9._~-]+", "Bearer [redacted]", detail)
+            detail = re.sub(r"(?i)(api[_ -]?key\\s*[:=]\\s*)[^\\s,;]+", r"\\1[redacted]", detail)
+            suffix = f"; provider_message={detail[:200]}" if detail else ""
+            raise GroqAPIError(f"Groq API returned HTTP {int(exc.code)}{suffix}") from exc
         except (URLError, TimeoutError) as exc:
             raise GroqAPIError(
                 f"Groq API network request failed ({type(exc).__name__})."
