@@ -6,8 +6,8 @@ Status snapshot: 2026-11-13, after Supabase URL repair and worker-mode correctio
 
 - [x] Approval engine, quota-aware scheduler, durable product releases, CRM source validation, authenticated mail and secure BMC fulfillment are merged into `main`.
 - [x] Render deployment for the integrated main branch completed successfully.
-- [x] Hosted readiness monitor passed: 14 agents, Supabase connected, embedded worker enabled/running, analysis-only mode.
-- [x] Supabase migrations through `20261112145112_product_download_rpc_security_invoker` are applied (20 migration records).
+- [x] Hosted readiness monitor previously passed: 14 agents, Supabase connected, analysis-only mode. The embedded worker is now intentionally disabled in favor of the scheduled Actions consumer.
+- [x] Supabase migrations through `20261112145112_product_download_rpc_security_invoker` were previously applied (20 recorded migrations); the 2026-11-13 performance SQL was applied directly and its idempotent migration file is committed for future environments.
 - [x] RLS is enabled on approval, product, mail, CRM, membership and payment tables; latest Supabase security advisor returned zero lints.
 - [x] Python 3.10, 3.11 and 3.12 CI passed on the integrated main commit.
 - [x] GitHub Actions is the selected queue consumer; Render embedded worker has been switched off to prevent two consumers racing on the same queue.
@@ -20,7 +20,7 @@ Status snapshot: 2026-11-13, after Supabase URL repair and worker-mode correctio
 - Supabase: 16 CRM companies; all 16 remain `not_checked` for source validation and `new` in the pipeline.
 - Queue at last database inspection: 6 completed tasks, 16 failed tasks, 15 dead-letter records, 84 agent output rows. Failed tasks are retained for controlled recovery; do not erase their audit history.
 - Commerce at last inspection: 1 product release in `review_required`, 0 product entitlements, 0 payment ledger entries, 0 bank settlements. No paid sale or buyer delivery has been proven.
-- Security advisor: no current lints reported.
+- Security advisor: no current lints reported. Performance advisor recheck after the 2026-11-13 index/RLS changes is pending.
 
 ## Required before autonomous operation
 
