@@ -36,6 +36,7 @@ from company.notifier import (
 )
 from company.scheduler import auto_tasks_enabled
 from company.store import TaskStore
+from company.llm import GeminiProvider, GroqProvider
 from company.worker import run_supervised, supervisor_status
 
 ROOT = Path(__file__).resolve().parent
@@ -186,13 +187,22 @@ def require_api_key(authorization: str | None = Header(default=None)) -> None:
 def provider_status() -> dict[str, Any]:
     gemini_configured = bool(os.getenv("GEMINI_API_KEY"))
     groq_configured = bool(os.getenv("GROQ_API_KEY"))
+    small_local = bool(os.getenv("AI_COMPANY_LOCAL_SMALL_URL") and os.getenv("AI_COMPANY_LOCAL_SMALL_MODEL"))
+    large_local = bool(os.getenv("AI_COMPANY_LOCAL_LARGE_URL") and os.getenv("AI_COMPANY_LOCAL_LARGE_MODEL"))
+    tiered = os.getenv("AI_COMPANY_ROUTING", "").strip().lower() == "tiered" or small_local or large_local
+    local_configured = bool(tiered and (small_local or large_local))
+    gemini_model = os.getenv("AI_COMPANY_GEMINI_MODEL", GeminiProvider.DEFAULT_MODEL)
+    groq_model = os.getenv("GROQ_MODEL", GroqProvider.DEFAULT_MODEL)
+    primary_model = gemini_model if gemini_configured else (groq_model if groq_configured else (
+        os.getenv("AI_COMPANY_LOCAL_LARGE_MODEL") if large_local else os.getenv("AI_COMPANY_LOCAL_SMALL_MODEL")
+    ))
     return {
         "gemini": gemini_configured,
         "groq": groq_configured,
-        "ollama": False,
-        "model": os.getenv("AI_COMPANY_GEMINI_MODEL", "gemini-3.5-flash-lite"),
-        "fallback_model": os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
-        "ready": gemini_configured or groq_configured,
+        "ollama": local_configured,
+        "model": primary_model or "",
+        "fallback_model": groq_model if gemini_configured and groq_configured else None,
+        "ready": gemini_configured or groq_configured or local_configured,
     }
 
 
