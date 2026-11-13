@@ -1,6 +1,7 @@
 name: Continuous AI Agent Worker
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
