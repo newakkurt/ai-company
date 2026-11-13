@@ -43,6 +43,8 @@ python -m company.cli trace <task_id> --verify
 - Hosted modda insan inceleme kuyruğu mevcut Supabase `approval_requests` tablosunu ve aynı `SUPABASE_DB_GATE_KEY` yetki kapısını kullanır; yerel geliştirmede SQLite kullanılır. Yeni tablo veya herkese açık API yetkisi açılmaz.
 - Ajan araç döngüsü yalnızca bir araç çağrısı yapar; araç çıktısı doğrulanır ve modelden sonuç özeti istenir. Shell varsayılan kapalıdır; yüksek riskli komutlar kuyruğa alınır.
 
+Canlı kurulum adımları: `docs/LIVE_SETUP_CHECKLIST.md`.
+
 ## Telegram tek-dokunuş onay
 - `/api/approvals` ile oluşan her onay talebi ve ürün fabrikasının her yeni ZIP'i için sahibe ✅/❌ butonlu mesaj gider.
 - `/approvals` bekleyen talepleri yeniden listeler. Butonlar yalnızca `TELEGRAM_ALLOWED_CHAT_IDS` içindeki hesaptan kabul edilir.
