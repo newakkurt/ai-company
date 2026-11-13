@@ -322,12 +322,32 @@ def run_forever(stop_event=None, poll_seconds: int = 15):
     print("agent_worker: shutdown complete", flush=True)
 
 
+def configured_provider_route() -> tuple[str, str]:
+    """Describe the configured provider route without exposing credentials."""
+    tiered = os.getenv("AI_COMPANY_ROUTING", "").strip().lower() == "tiered" or any(
+        os.getenv(name) for name in ("AI_COMPANY_LOCAL_SMALL_URL", "AI_COMPANY_LOCAL_LARGE_URL")
+    )
+    if tiered:
+        return "tiered_local_first", "local"
+    gemini = bool(os.getenv("GEMINI_API_KEY"))
+    groq = bool(os.getenv("GROQ_API_KEY"))
+    if gemini and groq:
+        return "gemini_primary_groq_fallback", os.getenv("AI_COMPANY_GEMINI_MODEL", "gemini-3.5-flash-lite")
+    if groq:
+        return "groq", os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+    if gemini:
+        return "gemini", os.getenv("AI_COMPANY_GEMINI_MODEL", "gemini-3.5-flash-lite")
+    return "unconfigured", ""
+
+
 def validate_environment():
     missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
     if not (os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY")):
         missing.append("GEMINI_API_KEY or GROQ_API_KEY")
     if missing:
         raise RuntimeError("Missing required worker secrets: " + ", ".join(missing))
+    route, model = configured_provider_route()
+    print(f"agent_worker: provider_route={route} model={model}", flush=True)
 
 
 def main():
