@@ -95,7 +95,8 @@ def _generate(provider, agent, system_prompt: str, prompt: str) -> str:
     outcome = run_with_retries(
         call_once, task_id=_task_id(prompt), description=prompt,
         queue=HumanReviewQueue(),
-        verify=lambda output: verify_output(output, min_chars=1, forbid_secrets=False),\n        raise_last_exception=True,
+        verify=lambda output: verify_output(output, min_chars=1, forbid_secrets=False),
+        raise_last_exception=True,
     )
     if outcome.status != "ok":
         if outcome.last_exception is not None:
