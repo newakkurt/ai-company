@@ -41,20 +41,37 @@ HIGH_RISK_ACTIONS = frozenset({
 })
 
 AGENT_CAPABILITIES = {
-    "ceo": frozenset({"planning", "routing", "review"}),
-    "chief_of_staff": frozenset({"planning", "coordination", "review"}),
-    "technology_architect": frozenset({"architecture", "code_review"}),
-    "software_engineer": frozenset({"code_draft", "code_review"}),
-    "network_infrastructure": frozenset({"network_research", "config_analysis"}),
-    "research_intelligence": frozenset({"public_research"}),
-    "marketing_growth": frozenset({"marketing_draft", "public_research"}),
-    "content_communications": frozenset({"content_draft", "editing"}),
-    "product_business": frozenset({"product_analysis", "crm_draft"}),
-    "data_analytics": frozenset({"analytics"}),
-    "memory_knowledge": frozenset({"knowledge_curation"}),
-    "qa_testing": frozenset({"test_design", "quality_review"}),
-    "security_compliance": frozenset({"security_review"}),
-    "finance_revenue_ops": frozenset({"financial_analysis"}),
+    "ceo": frozenset({"task_triage", "delegation", "decision_brief"}),
+    "chief_of_staff": frozenset({"project_breakdown", "dependency_mapping", "status_tracking"}),
+    "technology_architect": frozenset({"architecture_review", "technology_assessment", "interface_design"}),
+    "software_engineer": frozenset({"implementation_plan", "code_review", "refactor_plan"}),
+    "network_infrastructure": frozenset({"network_analysis", "infrastructure_design", "change_plan"}),
+    "research_intelligence": frozenset({"research_brief", "source_assessment", "option_comparison"}),
+    "marketing_growth": frozenset({"growth_plan", "seo_audit", "campaign_brief"}),
+    "content_communications": frozenset({"content_draft", "documentation", "localization"}),
+    "product_business": frozenset({"requirements", "prioritization", "business_case"}),
+    "data_analytics": frozenset({"metric_design", "data_quality_review", "report_plan"}),
+    "memory_knowledge": frozenset({"knowledge_capture", "decision_log", "knowledge_retrieval"}),
+    "qa_testing": frozenset({"test_plan", "risk_based_testing", "release_review"}),
+    "security_compliance": frozenset({"threat_review", "secret_hygiene", "permission_review"}),
+    "finance_revenue_ops": frozenset({"revenue_reconciliation", "subscription_metrics", "fee_analysis", "cashflow_reporting"}),
+}
+
+AGENT_TOOLS = {
+    "ceo": frozenset({"local_store_read"}),
+    "chief_of_staff": frozenset({"local_store_read", "local_store_write"}),
+    "technology_architect": frozenset({"local_files_read"}),
+    "software_engineer": frozenset({"repository_read"}),
+    "network_infrastructure": frozenset({"inventory_read"}),
+    "research_intelligence": frozenset({"web_read"}),
+    "marketing_growth": frozenset({"analytics_read"}),
+    "content_communications": frozenset({"content_read"}),
+    "product_business": frozenset({"product_data_read"}),
+    "data_analytics": frozenset({"data_read"}),
+    "memory_knowledge": frozenset({"knowledge_read", "knowledge_write"}),
+    "qa_testing": frozenset({"test_results_read"}),
+    "security_compliance": frozenset({"security_config_read"}),
+    "finance_revenue_ops": frozenset({"authorized_billing_metadata_read"}),
 }
 
 class GovernanceError(RuntimeError):
@@ -104,6 +121,16 @@ def require_agent_capability(agent_id: str, capability: str) -> None:
     allowed = AGENT_CAPABILITIES.get(agent_id)
     if allowed is None or capability not in allowed:
         raise GovernanceError("agent_capability_denied")
+
+def require_agent_profile(agent_id: str, capabilities, tools=()) -> None:
+    allowed_capabilities = AGENT_CAPABILITIES.get(agent_id)
+    allowed_tools = AGENT_TOOLS.get(agent_id)
+    if allowed_capabilities is None or allowed_tools is None:
+        raise GovernanceError("unknown_agent_denied")
+    if not set(capabilities or ()).issubset(allowed_capabilities):
+        raise GovernanceError("agent_capability_denied")
+    if not set(tools or ()).issubset(allowed_tools):
+        raise GovernanceError("agent_tool_denied")
 
 def require_human_approval(action: str) -> None:
     if action in HIGH_RISK_ACTIONS:
