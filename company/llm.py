@@ -13,6 +13,14 @@ GEMINI_MAX_OUTPUT_TOKENS = 65536   # upper bound accepted for Gemini Flash-class
 GROQ_MAX_OUTPUT_TOKENS = 8000      # conservative cap for llama-3.1-8b-instant
 
 
+def normalize_api_key(value: object) -> str:
+    """Trim whitespace and accidental matching quotes around copied provider secrets."""
+    key = str(value or "").strip()
+    if len(key) >= 2 and key[0] == key[-1] and key[0] in {"'", '"'}:
+        key = key[1:-1].strip()
+    return key
+
+
 def clamp_max_tokens(requested, ceiling: int) -> int:
     """Return a safe output-token budget: default when unset, never above the provider ceiling."""
     if requested is None:
@@ -34,7 +42,7 @@ class GeminiProvider:
     supports_search = True
 
     def __init__(self, api_key=None, model=None, timeout=45):
-        self.api_key = str(api_key if api_key is not None else os.getenv("GEMINI_API_KEY", "")).strip()
+        self.api_key = normalize_api_key(api_key if api_key is not None else os.getenv("GEMINI_API_KEY", ""))
         self.model = model or os.getenv("AI_COMPANY_GEMINI_MODEL", self.DEFAULT_MODEL)
         self.timeout = timeout
 
@@ -182,7 +190,7 @@ class GroqProvider:
     ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
     def __init__(self, api_key=None, model=None, timeout=45):
-        self.api_key = str(api_key if api_key is not None else os.getenv("GROQ_API_KEY", "")).strip()
+        self.api_key = normalize_api_key(api_key if api_key is not None else os.getenv("GROQ_API_KEY", ""))
         self.model = model or os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
         self.timeout = timeout
 
@@ -208,6 +216,7 @@ class GroqProvider:
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json",
+                "User-Agent": "AICompanyWorker/1.0",
                 "Authorization": "Bearer " + self.api_key,
             },
             method="POST",
@@ -231,6 +240,9 @@ class GroqProvider:
             detail = re.sub(r"(?i)(api[_ -]?key\s*[:=]\s*)[^\s,;]+", r"\1[redacted]", detail)
             detail = re.sub(r"gsk_[A-Za-z0-9_-]{12,}", "[redacted]", detail)
             detail = re.sub(r"\s+", " ", detail).strip()
+            if not detail:
+                content_type = (exc.headers.get("Content-Type", "") if exc.headers else "")[:80]
+                detail = f"reason={str(exc.reason)[:80]}; content_type={content_type}"
             suffix = f"; provider_message={detail[:180]}" if detail else ""
             raise GroqAPIError(f"Groq API returned HTTP {int(exc.code)}{suffix}") from exc
         except (URLError, TimeoutError) as exc:
@@ -301,8 +313,8 @@ class FallbackProvider:
 
 def _get_cloud_provider():
     """Prefer Gemini; use Groq as a quota-safe fallback when its key is configured."""
-    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    gemini_key = normalize_api_key(os.getenv("GEMINI_API_KEY", ""))
+    groq_key = normalize_api_key(os.getenv("GROQ_API_KEY", ""))
     gemini = GeminiProvider(api_key=gemini_key) if gemini_key else None
     groq = GroqProvider(api_key=groq_key) if groq_key else None
     if gemini and groq:
