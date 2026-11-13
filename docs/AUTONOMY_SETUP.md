@@ -9,7 +9,7 @@ Bu sistem görevleri otomatik üretir ve araştırma/analiz/ürün taslağı iş
 - İş akışları dönüşümlüdür: müşteri araştırması, ürün fırsatı, ürün fabrikası, SEO, LinkedIn, YouTube, Instagram, Telegram, görsel brief, e-posta kampanyası taslağı, dönüşüm analizi ve haftalık büyüme raporu.
 - Haftalık ürün fabrikası tek bir küçük offline-first Python API starter ZIP üretir.
 - Görev kimlikleri tarih/hafta bazlıdır; tekrar seed edilmez.
-- Kota hatalarında 24 saat bekleme ve en fazla bir retry; diğer hatalarda sınırlı retry.
+- Kota hatalarında Groq varsa 30 dakika bekleme ve en fazla 3 deneme; Groq yoksa 24 saat bekleme ve en fazla 3 deneme. Diğer hatalarda en fazla 2 retry.
 - Ürün, müşteri ve gelir verisi yoksa ajanlar bunu açıkça belirtir; sayı uydurmaz.
 
 ## Worker seçimi
