@@ -250,7 +250,7 @@ class TieredProvider:
             provider = self.providers[tier]
             search_here = use_search and getattr(provider, "supports_search", False)
             decision.search_dropped = bool(use_search and not search_here)
-            if tier is Tier.LARGE_LOCAL and getattr(provider, "local", False):
+            if tier is Tier.LARGE_LOCAL and getattr(provider, "local", False) is True:
                 from .context_gate import (
                     available_memory_gb, estimate_model_gb, fits_in_budget, memory_budget_gb,
                 )
