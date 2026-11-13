@@ -4,7 +4,7 @@ from pathlib import Path
 
 from company.harness import safety
 from company.harness.state_machine import (
-    InvalidTransition, State, TaskMachine, can_transition, read_trace, record_transition, verify_trace,
+    InvalidTransition, State, TaskMachine, can_transition, read_trace, record_transition, safe_record, verify_trace,
 )
 
 
@@ -32,6 +32,10 @@ class StateMachineTests(unittest.TestCase):
         with self.assertRaises(InvalidTransition):
             machine.to(State.COMPLETED, "skip")
         self.assertEqual(read_trace("t-2", self.dir), [])
+
+    def test_safe_record_does_not_swallow_illegal_transition(self):
+        with self.assertRaises(InvalidTransition):
+            safe_record("t-invalid", "planned", "completed", "bad_transition")
 
     def test_failed_task_can_retry_or_escalate_but_not_complete(self):
         self.assertTrue(can_transition("failed", "planned"))
