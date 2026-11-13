@@ -157,7 +157,7 @@ class TaskMachine:
 def safe_record(task_id: str, src, dst, trigger: str, **params):
     """Best-effort tracing for production paths: never raises, never alters task outcome."""
     try:
-        return record_transition(task_id, src, dst, trigger, params, enforce=False)
+        return record_transition(task_id, src, dst, trigger, params, enforce=True)
     except Exception as exc:  # noqa: BLE001
         print(f"trace: write failed; error_type={type(exc).__name__}", flush=True)
         return None
