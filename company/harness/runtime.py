@@ -15,7 +15,7 @@ from .escalation import HumanReviewQueue, run_with_retries, verify_output
 from .routing import Tier
 from .tools import ToolBox
 
-_CALL = re.compile(r"TOOL_CALL_JSON\s*:\s*(\{.*?\})", re.I | re.S)
+_CALL = re.compile(r"TOOL_CALL_JSON\s*:\s*", re.I)
 
 
 def _tier_for(provider, agent_id: str) -> Tier:
@@ -55,7 +55,8 @@ def generate_with_context(provider, agent, system_prompt: str, user_prompt: str)
     if not match:
         return first
     try:
-        decoder = json.JSONDecoder()\n        request, _end = decoder.raw_decode(first[match.end():].lstrip())
+        decoder = json.JSONDecoder()
+        request, _end = decoder.raw_decode(first[match.end():].lstrip())
     except (TypeError, ValueError):
         return "Tool request rejected: invalid JSON.\n" + first
     name = request.get("name")
