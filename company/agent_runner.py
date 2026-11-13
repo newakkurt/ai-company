@@ -2,7 +2,7 @@
 from .agents import load_agents, route_task
 from .llm import get_provider
 from .store import TaskStore
-from .governance import require_agent_profile
+from .governance import require_agent_profile, require_safe_model_route
 
 # Roles that need live public-web evidence (companies, competitors, demand).
 SEARCH_AGENTS = frozenset({"research_intelligence", "marketing_growth", "product_business"})
@@ -76,6 +76,9 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
             "delete data, or change network devices."
             f"{specialist_context}"
         )
+        # Re-screen the complete prompt, including persisted specialist outputs,
+        # immediately before every provider call.
+        require_safe_model_route(prompt, provider_available=True)
         print(f"agent_worker: requesting agent={agent.id} task={task_id}", flush=True)
         output = _generate(provider, agent, build_system_prompt(agent), prompt)
         store.record_agent_output(task_id, agent.id, output)
