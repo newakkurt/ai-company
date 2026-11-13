@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, call
 
-from company.agent_runner import run_task
+from company.agent_runner import build_system_prompt, run_task
 from company.store import TaskStore
 
 
@@ -46,6 +46,19 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(len(results), 14)
         self.assertEqual(results[-1]["agent_id"], "ceo")
         self.assertEqual(len(self.store.get_task(self.task["task_id"])["agent_outputs"]), 14)
+
+    def test_content_role_writes_the_requested_artifact_not_only_a_plan(self):
+        from company.agents import load_agents
+        content_agent = next(agent for agent in load_agents() if agent.id == "content_communications")
+        prompt = build_system_prompt(content_agent, {"description": "Write the actual Turkish SEO article now."})
+        self.assertIn("write the complete requested artifact itself", prompt)
+        self.assertIn("Do not substitute a plan", prompt)
+
+    def test_non_content_roles_keep_structured_report_guidance(self):
+        from company.agents import load_agents
+        ceo = next(agent for agent in load_agents() if agent.id == "ceo")
+        prompt = build_system_prompt(ceo, {"description": "Review the task."})
+        self.assertIn("Objective, Findings, Proposed next steps", prompt)
 
     def test_runner_rejects_unknown_task(self):
         with self.assertRaises(KeyError):
