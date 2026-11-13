@@ -1,0 +1,175 @@
+"""Narrow governance controls for the AI Company worker.
+
+This module is deliberately stdlib-only. It supplies enforceable policy decisions;
+it does not pretend that a cloud worker is a local model host.
+"""
+from __future__ import annotations
+
+import os
+import re
+import threading
+import time
+from dataclasses import dataclass
+from typing import Mapping
+
+MAX_TOTAL_ATTEMPTS = 3
+MAX_RETRIES = MAX_TOTAL_ATTEMPTS - 1
+CIRCUIT_FAILURE_THRESHOLD = 3
+CIRCUIT_RESET_SECONDS = 60
+
+# Conservative task-description screening. Actual payloads must also be screened
+# at ingestion; this first guard prevents obvious sensitive work reaching cloud LLMs.
+_RESTRICTED = re.compile(
+    r"\b(api[_ -]?key|access[_ -]?token|password|passwd|private[_ -]?key|"
+    r"secret|credential|iban|credit[_ -]?card|bank[_ -]?account|"
+    r"tc kimlik|national id|social security|medical record|health record|"
+    r"patient|payroll|salary|employee record|customer personal data)\b",
+    re.IGNORECASE,
+)
+_CONFIDENTIAL = re.compile(
+    r"\b(internal network|internal topology|production config|"
+    r"customer config|customer database|private customer|"
+    r"kvkk|gdpr|confidential|restricted data)\b",
+    re.IGNORECASE,
+)
+
+HIGH_RISK_ACTIONS = frozenset({
+    "publish_product", "send_email", "send_campaign", "issue_refund",
+    "change_payment", "delete_data", "change_permissions", "deploy_production",
+    "execute_shell", "network_device_write", "export_customer_data",
+})
+
+AGENT_CAPABILITIES = {
+    "ceo": frozenset({"planning", "routing", "review"}),
+    "chief_of_staff": frozenset({"planning", "coordination", "review"}),
+    "technology_architect": frozenset({"architecture", "code_review"}),
+    "software_engineer": frozenset({"code_draft", "code_review"}),
+    "network_infrastructure": frozenset({"network_research", "config_analysis"}),
+    "research_intelligence": frozenset({"public_research"}),
+    "marketing_growth": frozenset({"marketing_draft", "public_research"}),
+    "content_communications": frozenset({"content_draft", "editing"}),
+    "product_business": frozenset({"product_analysis", "crm_draft"}),
+    "data_analytics": frozenset({"analytics"}),
+    "memory_knowledge": frozenset({"knowledge_curation"}),
+    "qa_testing": frozenset({"test_design", "quality_review"}),
+    "security_compliance": frozenset({"security_review"}),
+    "finance_revenue_ops": frozenset({"financial_analysis"}),
+}
+
+class GovernanceError(RuntimeError):
+    """Raised when a task or action violates a mandatory governance rule."""
+
+@dataclass(frozen=True)
+class Classification:
+    level: str
+    reason: str
+
+def classify_task(text: str) -> Classification:
+    value = str(text or "")
+    if _RESTRICTED.search(value):
+        return Classification("restricted", "sensitive_identifier_or_secret_pattern")
+    if _CONFIDENTIAL.search(value):
+        return Classification("confidential", "internal_or_regulated_context")
+    return Classification("public", "no_sensitive_pattern_detected")
+
+def kill_switch_enabled(env: Mapping[str, str] | None = None) -> bool:
+    source = os.environ if env is None else env
+    return str(source.get("AI_COMPANY_KILL_SWITCH", "")).strip().lower() in {"1", "true", "yes", "on"}
+
+def local_model_configured(env: Mapping[str, str] | None = None) -> bool:
+    source = os.environ if env is None else env
+    return bool(source.get("OLLAMA_BASE_URL") and source.get("AI_COMPANY_LOCAL_MODEL"))
+
+def cloud_route_allowed(classification: Classification, env: Mapping[str, str] | None = None) -> bool:
+    # Cloud is never an allowed route for confidential/restricted task descriptions.
+    if classification.level != "public":
+        return False
+    source = os.environ if env is None else env
+    return bool(source.get("GEMINI_API_KEY") or source.get("GROQ_API_KEY"))
+
+def require_safe_model_route(text: str, env: Mapping[str, str] | None = None) -> str:
+    classification = classify_task(text)
+    if classification.level != "public":
+        if local_model_configured(env):
+            # The current worker has no Ollama adapter yet; fail closed rather than
+            # silently sending sensitive data to Gemini/Groq.
+            raise GovernanceError("local_model_adapter_not_implemented")
+        raise GovernanceError("sensitive_task_blocked_from_cloud")
+    if not cloud_route_allowed(classification, env):
+        raise GovernanceError("no_allowed_model_provider")
+    return "cloud_general"
+
+def require_agent_capability(agent_id: str, capability: str) -> None:
+    allowed = AGENT_CAPABILITIES.get(agent_id)
+    if allowed is None or capability not in allowed:
+        raise GovernanceError("agent_capability_denied")
+
+def require_human_approval(action: str) -> None:
+    if action in HIGH_RISK_ACTIONS:
+        raise GovernanceError("human_approval_required")
+
+def governance_snapshot(env: Mapping[str, str] | None = None) -> dict:
+    source = os.environ if env is None else env
+    return {
+        "kill_switch": kill_switch_enabled(source),
+        "max_total_attempts": MAX_TOTAL_ATTEMPTS,
+        "max_retries": MAX_RETRIES,
+        "local_model": {
+            "configured": local_model_configured(source),
+            "adapter": "not_implemented",
+            "sensitive_cloud_fallback": False,
+        },
+        "cloud_provider": {
+            "configured": bool(source.get("GEMINI_API_KEY") or source.get("GROQ_API_KEY")),
+            "allowed_for": "public_non_sensitive_tasks_only",
+        },
+        "budget": {
+            "daily_task_limit": int(source.get("AI_COMPANY_DAILY_TASK_LIMIT", "20")),
+            "monthly_spend_limit_usd": float(source.get("AI_COMPANY_MONTHLY_SPEND_LIMIT_USD", "0")),
+            "enforcement": "not_yet_metered",
+        },
+        "external_actions": "human_approval_required",
+        "capability_policy": "deny_by_default",
+    }
+
+class CircuitBreaker:
+    """Thread-safe process-local circuit breaker for a flaky provider."""
+
+    def __init__(self, threshold: int = CIRCUIT_FAILURE_THRESHOLD,
+                 reset_seconds: int = CIRCUIT_RESET_SECONDS):
+        self.threshold = max(1, int(threshold))
+        self.reset_seconds = max(1, int(reset_seconds))
+        self._lock = threading.Lock()
+        self._failures = 0
+        self._opened_at = 0.0
+
+    def allow_request(self, now: float | None = None) -> bool:
+        current = time.monotonic() if now is None else now
+        with self._lock:
+            if self._failures < self.threshold:
+                return True
+            return current - self._opened_at >= self.reset_seconds
+
+    def record_success(self) -> None:
+        with self._lock:
+            self._failures = 0
+            self._opened_at = 0.0
+
+    def record_failure(self, now: float | None = None) -> None:
+        current = time.monotonic() if now is None else now
+        with self._lock:
+            self._failures += 1
+            if self._failures >= self.threshold and not self._opened_at:
+                self._opened_at = current
+
+    def status(self, now: float | None = None) -> dict:
+        current = time.monotonic() if now is None else now
+        with self._lock:
+            opened = self._failures >= self.threshold
+            return {
+                "state": "half_open" if opened and current - self._opened_at >= self.reset_seconds
+                         else "open" if opened else "closed",
+                "failures": self._failures,
+                "threshold": self.threshold,
+                "reset_seconds": self.reset_seconds,
+            }
