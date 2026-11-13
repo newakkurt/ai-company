@@ -185,8 +185,8 @@ def require_api_key(authorization: str | None = Header(default=None)) -> None:
 
 
 def provider_status() -> dict[str, Any]:
-    gemini_configured = bool(os.getenv("GEMINI_API_KEY"))
-    groq_configured = bool(os.getenv("GROQ_API_KEY"))
+    gemini_configured = bool(os.getenv("GEMINI_API_KEY", "").strip())
+    groq_configured = bool(os.getenv("GROQ_API_KEY", "").strip())
     small_local = bool(os.getenv("AI_COMPANY_LOCAL_SMALL_URL") and os.getenv("AI_COMPANY_LOCAL_SMALL_MODEL"))
     large_local = bool(os.getenv("AI_COMPANY_LOCAL_LARGE_URL") and os.getenv("AI_COMPANY_LOCAL_LARGE_MODEL"))
     tiered = os.getenv("AI_COMPANY_ROUTING", "").strip().lower() == "tiered" or small_local or large_local
