@@ -8,7 +8,7 @@ import sqlite3
 import uuid
 from contextlib import closing
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .privacy import redact, scan
@@ -42,7 +42,7 @@ class HumanReviewQueue:
 
     def __init__(self, path: Path | str | None = None, store=None):
         self._store = store
-        if self._store is None and all(os.getenv(key) for key in (
+        if self._store is None and path is None and all(os.getenv(key) for key in (
             "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY"
         )):
             from ..store import SupabaseTaskStore
@@ -108,7 +108,7 @@ class HumanReviewQueue:
                 },
                 "requested_by": "agent_harness", "status": "pending",
                 "requested_at": now.isoformat(),
-                "expires_at": (now.replace(year=now.year + 1)).isoformat(),
+                "expires_at": (now + timedelta(days=365)).isoformat(),
             }, prefer="return=minimal")
             return review_id
 
