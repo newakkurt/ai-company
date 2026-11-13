@@ -217,3 +217,38 @@ def update_company_stage(company_id: str, stage: str, store=None):
     rows=db._request("crm_companies",params={"select":"*","company_id":f"eq.{company_id}","limit":"1"})
     if not rows: raise KeyError("Company not found")
     return rows[0]
+
+
+def verify_unchecked_companies(store=None, limit: int = 2) -> list[dict]:
+    """Verify a small batch of previously imported public company sources.
+
+    This only performs bounded public HTTPS GET checks. It never marks a company
+    human_verified, changes its sales stage, or contacts a person.
+    """
+    from .source_verification import verify_public_source
+
+    db = _db(store)
+    batch = max(1, min(int(limit), 5))
+    rows = db._request("crm_companies", params={
+        "select": "company_id,company_name,source_url,source_validation_status",
+        "source_validation_status": "eq.not_checked",
+        "order": "created_at.asc",
+        "limit": str(batch),
+    })
+    checked = []
+    for company in rows:
+        result = verify_public_source(
+            str(company.get("source_url") or ""),
+            str(company.get("company_name") or ""),
+        )
+        db._request(
+            "crm_companies", "PATCH",
+            {"company_id": f"eq.{company['company_id']}"},
+            {**result, "updated_at": now()},
+            "return=minimal",
+        )
+        checked.append({
+            "company_id": company["company_id"],
+            "source_validation_status": result["source_validation_status"],
+        })
+    return checked
