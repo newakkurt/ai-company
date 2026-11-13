@@ -2,6 +2,7 @@
 from .agents import load_agents, route_task
 from .llm import get_provider
 from .store import TaskStore
+from .governance import require_agent_profile
 
 # Roles that need live public-web evidence (companies, competitors, demand).
 SEARCH_AGENTS = frozenset({"research_intelligence", "marketing_growth", "product_business"})
@@ -54,6 +55,8 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
         agent = agents.get(assignment["agent_id"])
         if agent is None or agent.id in persisted:
             continue
+        # The checked-in registry is not trusted to grant new tools or capabilities.
+        require_agent_profile(agent.id, agent.capabilities, getattr(agent, "tools", ()))
         # Another worker may have saved this role since we started (e.g. after a
         # lease expiry). Re-check right before paying for another LLM call.
         latest = {item["agent_id"]: item["output_text"] for item in store.list_agent_outputs(task_id)}
