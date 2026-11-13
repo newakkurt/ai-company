@@ -115,6 +115,7 @@ class LocalProvider:
     """OpenAI-compatible local endpoint (Ollama, llama.cpp server, LM Studio, vLLM)."""
 
     supports_search = False
+    local = True
 
     def __init__(self, base_url: str, model: str, timeout: int = 300, api_key: str = "",
                  allow_remote: bool = False):
@@ -249,7 +250,7 @@ class TieredProvider:
             provider = self.providers[tier]
             search_here = use_search and getattr(provider, "supports_search", False)
             decision.search_dropped = bool(use_search and not search_here)
-            if tier is Tier.LARGE_LOCAL:
+            if tier is Tier.LARGE_LOCAL and getattr(provider, "local", False):
                 from .context_gate import (
                     available_memory_gb, estimate_model_gb, fits_in_budget, memory_budget_gb,
                 )
@@ -263,6 +264,7 @@ class TieredProvider:
                 required = estimate_model_gb(params_b, quant_bits)
                 if not fits_in_budget(0, required, reserve_gb=reserve, budget_gb=budget):
                     decision.skipped.append((tier.value, "memory_budget_exceeded"))
+                    last_error = LocalProviderError("Large local model skipped: RAM budget exceeded")
                     continue
             try:
                 if tier is Tier.LARGE_LOCAL:
@@ -281,7 +283,7 @@ class TieredProvider:
             return output
         decision.error = "all_eligible_tiers_failed"
         self._record(decision)
-        raise last_error  # type: ignore[misc]
+        if last_error is not None:\n            raise last_error\n        raise PrivacyRoutingError("No eligible model tier after safety and memory checks")
 
     @staticmethod
     def _call(provider, system_prompt, user_prompt, use_search, max_tokens):
