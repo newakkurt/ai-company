@@ -19,7 +19,7 @@ from .scheduler import seed_due_tasks
 from .store import TaskStore
 from .governance import (
     CircuitBreaker, GovernanceError, block_claimed_task,
-    kill_switch_enabled, require_safe_model_route,
+    kill_switch_enabled, require_safe_model_route, governance_snapshot,
 )
 
 REQUIRED_ENV = (
@@ -137,13 +137,21 @@ def process_one_task(store=None, provider=None):
     if not _PROVIDER_BREAKER.allow_request():
         return {"status": "paused", "reason": "provider_circuit_open"}
     store = store or TaskStore()
+    budget = governance_snapshot()["budget"]
+    today = datetime.now(timezone.utc).date().isoformat()
+    todays_tasks = [
+        item for item in store.list_tasks(limit=100)
+        if str(item.get("created_at", "")).startswith(today)
+    ]
+    if len(todays_tasks) >= budget["daily_task_limit"]:
+        return {"status": "paused", "reason": "daily_task_limit"}
     task_id = store.claim_next_task()
     if not task_id:
         return {"status": "idle"}
 
     task = store.get_task(task_id) or {}
     try:
-        require_safe_model_route(task.get("description", ""))
+        require_safe_model_route(task.get("description", ""), provider_available=provider is not None)
     except GovernanceError as exc:
         block_claimed_task(store, task_id, str(exc))
         print(f"agent_worker: blocked task {task_id}; reason={str(exc)}", flush=True)
