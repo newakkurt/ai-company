@@ -57,7 +57,7 @@ Gerekli temel değişkenler:
 - `SUPABASE_DB_GATE_KEY`
 - `GEMINI_API_KEY` veya `GROQ_API_KEY`
 
-Worker her 5 dakikada bir en fazla bir görevi işler. Varsayılan tercih budur. Aynı anda iki consumer çalıştırmamak için GitHub Actions schedule açıkken `AI_COMPANY_EMBEDDED_WORKER=false) bırak.
+Worker her 5 dakikada bir en fazla bir görevi işler. Varsayılan tercih budur. Aynı anda iki consumer çalıştırmamak için GitHub Actions schedule açıkken `AI_COMPANY_EMBEDDED_WORKER=false` bırak.
 
 ### Worker ve kota
 
