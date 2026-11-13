@@ -52,7 +52,7 @@ class GeminiProviderTests(unittest.TestCase):
     def test_groq_api_key_is_trimmed_before_auth_header(self):
         response = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
         with patch("company.llm.urlopen", return_value=response) as request:
-            provider = GroqProvider(api_key="  groq-test-key\\n")
+            provider = GroqProvider(api_key="  groq-test-key\n")
             self.assertEqual(provider.generate("system", "user"), "Groq OK")
         self.assertEqual(request.call_args.args[0].get_header("Authorization"), "Bearer groq-test-key")
 
