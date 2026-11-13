@@ -8,6 +8,7 @@ on:
       - ".github/workflows/agent-worker.yml"
       - "company/**"
       - "requirements.txt"
+      - ".github/workflows/agent-worker.yml"
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
