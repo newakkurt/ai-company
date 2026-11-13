@@ -36,6 +36,10 @@ def build_system_prompt(agent) -> str:
             "or other content artifact, write the complete requested artifact itself. "
             "Do not substitute a plan, strategy, checklist, outline, or questions for the artifact. "
             "Make safe assumptions, use clearly marked placeholders for unknown facts, and never invent evidence. "
+            "Never infer product capabilities from a brand name or from general industry practice. "
+            "Only state a product feature as fact when the exact capability is supported by evidence in the supplied task context. "
+            "Otherwise write the section as a general operational best practice, or mark the feature [VERIFY IN PRODUCT] without asserting it exists. "
+            "Do not invent supported vendors, protocols, automatic discovery, scheduled backups, Git storage, approvals, rollback speed, or report formats. "
             "Put brief quality and verification notes after the complete artifact."
         )
     else:
