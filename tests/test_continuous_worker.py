@@ -5,7 +5,7 @@ from pathlib import Path
 from company.agents import load_agents
 from company.llm import GeminiAPIError
 from company.store import TaskStore
-from company.worker import process_one_task
+from company.worker import configured_provider_route, process_one_task
 
 
 class FakeProvider:
@@ -39,6 +39,21 @@ class ContinuousWorkerTests(unittest.TestCase):
         task = self.store.create_task("Test continuous analysis worker in dry-run mode")
         self.store.assign_agents(task["task_id"], [agent.id for agent in load_agents()])
         return task["task_id"]
+
+    def test_provider_route_reports_groq_only_without_secret_values(self):
+        from unittest.mock import patch
+
+        with patch.dict("os.environ", {"GROQ_API_KEY": "hidden", "GROQ_MODEL": "openai/gpt-oss-20b"}, clear=True):
+            route, model = configured_provider_route()
+        self.assertEqual(route, "groq")
+        self.assertEqual(model, "openai/gpt-oss-20b")
+
+    def test_provider_route_reports_gemini_with_groq_fallback(self):
+        from unittest.mock import patch
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "hidden-g", "GROQ_API_KEY": "hidden-r"}, clear=True):
+            route, _ = configured_provider_route()
+        self.assertEqual(route, "gemini_primary_groq_fallback")
 
     def test_worker_claims_runs_and_persists_all_agent_outputs(self):
         task_id = self.make_task()
