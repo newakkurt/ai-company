@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_MAX_OUTPUT_TOKENS = 2048   # analysis reports
 GEMINI_MAX_OUTPUT_TOKENS = 65536   # upper bound accepted for Gemini Flash-class models
-GROQ_MAX_OUTPUT_TOKENS = 1024      # stay within the free-tier TPM budget for multi-agent tasks
+GROQ_MAX_OUTPUT_TOKENS = 2048      # default output cap; TPM overflow is handled by bounded backoff
 
 
 def normalize_api_key(value: object) -> str:
