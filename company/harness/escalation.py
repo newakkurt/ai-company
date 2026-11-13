@@ -226,7 +226,8 @@ class Outcome:
 
 
 def run_with_retries(func, *, task_id: str, description: str = "", queue: HumanReviewQueue | None = None,
-                     max_attempts: int = MAX_ATTEMPTS, verify=None, sleeper=None,\n                     raise_last_exception: bool = False) -> Outcome:
+                     max_attempts: int = MAX_ATTEMPTS, verify=None, sleeper=None,
+                     raise_last_exception: bool = False) -> Outcome:
     """Run *func* at most *max_attempts* (hard cap 3) times, verifying each result.
 
     High-risk/subjective work is escalated before the first attempt; exhausted work
