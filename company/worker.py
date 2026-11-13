@@ -351,7 +351,16 @@ def validate_environment():
     if missing:
         raise RuntimeError("Missing required worker secrets: " + ", ".join(missing))
     route, model = configured_provider_route()
-    print(f"agent_worker: provider_route={route} model={model}", flush=True)
+    raw_groq_key = os.getenv("GROQ_API_KEY", "").strip().strip('"').strip("'")
+    groq_key_format = (
+        "valid_looking" if raw_groq_key.startswith("gsk_") and len(raw_groq_key) >= 32
+        else "unknown"
+    )
+    print(
+        f"agent_worker: provider_route={route} model={model} "
+        f"groq_key_format={groq_key_format}",
+        flush=True,
+    )
 
 
 def main():
