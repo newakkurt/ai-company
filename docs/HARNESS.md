@@ -41,3 +41,10 @@ python -m company.cli trace <task_id> --verify
 - Yerel model gerçek uçtan uca testi bu ortamda yapılmadı (GPU/Ollama yok); `LocalProvider` HTTP sözleşmesi
   ve yönlendirme mantığı birim testlerle doğrulandı.
 - Durum makinesi mevcut `tasks.status` sütununu değiştirmez; geçişler ek iz kaydıdır.
+
+## Telegram tek-dokunuş onay
+- `/api/approvals` ile oluşan her onay talebi ve ürün fabrikasının her yeni ZIP'i için sahibe ✅/❌ butonlu mesaj gider.
+- `/approvals` bekleyen talepleri yeniden listeler. Butonlar yalnızca `TELEGRAM_ALLOWED_CHAT_IDS` içindeki hesaptan kabul edilir.
+- Buton yalnızca **karar kaydeder**. Eylem (ör. yayın) çalışırken onay yine tam eylem + kapsam (`product_id` + `sha256`)
+  ile tek kullanımlık tüketilir; süresi dolan veya ikinci kez basılan buton kararı değiştirmez.
+- Ürün mesajı QA durumunu gösterir; üretilen kod çalıştırılmadığı için izole test olmadan onay önerilmez.

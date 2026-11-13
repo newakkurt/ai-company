@@ -350,6 +350,8 @@ def create_approval(payload: ApprovalRequestInput):
         item = store.create_approval_request(
             payload.action, payload.scope, payload.requested_by, payload.expires_hours
         )
+        from company.notifier import notify_approval_request
+        notify_approval_request(item)  # best-effort one-tap Telegram buttons
         return item
     except ApprovalError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

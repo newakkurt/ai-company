@@ -74,6 +74,29 @@ def _escalate_to_human(task_id: str, reason: str, error_type: str):
         print(f"agent_worker: escalation failed; error_type={type(exc).__name__}", flush=True)
 
 
+def _request_publish_approval(store, release: dict):
+    """Ask the owner (one-tap Telegram) to approve publishing this exact build.
+
+    Scope equals what POST /api/factory/products/{id}/publish consumes
+    ({product_id, sha256}), so the approval cannot be reused for another file.
+    Best-effort: failure here never fails the task; the owner can still create it via the API.
+    """
+    try:
+        from .notifier import notify_approval_request
+        approval = store.create_approval_request(
+            "publish_product", {"product_id": release["product_id"], "sha256": release["checksum"]},
+            "product_factory", 72)
+        qa = release.get("qa") or {}
+        notify_approval_request(approval, extra=(
+            f"Ürün: {release.get('name')} v{release.get('version')}\n"
+            f"QA: sözdizimi={qa.get('syntax_parse')}, çalışma testi={qa.get('runtime_tests')}, "
+            f"güvenlik={qa.get('security')}\n"
+            "⚠️ Üretilen kod çalıştırılmadı; izole ortamda test edilmeden onaylamanız önerilmez."))
+        print(f"agent_worker: publish approval requested; product_id={release['product_id']}", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"agent_worker: publish approval request failed; error_type={type(exc).__name__}", flush=True)
+
+
 def _safe_notify(func, *args):
     """Notifications are best-effort and must never change a task's outcome."""
     try:
@@ -203,6 +226,7 @@ def process_one_task(store=None, provider=None):
             )
             with open(release["download_path"], "rb") as artifact_file:
                 store.save_product_release(release, artifact_file.read())
+            _request_publish_approval(store, release)
             store.record_agent_output(
                 task_id, "product_factory",
                 "Generated durable release metadata (source not executed):\n"

@@ -36,7 +36,43 @@ class TelegramIntake:
     def send_message(self, chat_id, text):
         return self._api("sendMessage", {"chat_id": str(chat_id), "text": text})
 
+    def answer_callback(self, callback_id, text):
+        try:
+            self._api("answerCallbackQuery", {"callback_query_id": callback_id, "text": text[:180]})
+        except Exception as exc:  # noqa: BLE001 - never log URL (contains token)
+            print(f"telegram: answerCallback failed; error_type={type(exc).__name__}", flush=True)
+
+    def handle_callback(self, callback):
+        """One-tap approval. Records the decision only; the protected action still has to
+        consume the approval (exact action + scope, single use) when it actually runs."""
+        data = str(callback.get("data") or "")
+        sender_id = str((callback.get("from") or {}).get("id", ""))
+        chat_id = str(((callback.get("message") or {}).get("chat") or {}).get("id", ""))
+        if sender_id not in self.allowed_chat_ids or chat_id not in self.allowed_chat_ids:
+            return False
+        prefix, _, rest = data.partition(":")
+        decision_code, _, approval_id = rest.partition(":")
+        if prefix != "apv" or decision_code not in {"ok", "no"} or not approval_id.startswith("approval-"):
+            self.answer_callback(callback.get("id"), "Geçersiz işlem.")
+            return True
+        decision = "approved" if decision_code == "ok" else "rejected"
+        try:
+            self.store.decide_approval_request(approval_id, decision, f"telegram:{sender_id}")
+            result = "✅ Onaylandı (tek kullanımlık)" if decision == "approved" else "❌ Reddedildi"
+        except KeyError:
+            result = "Talep bulunamadı."
+        except ValueError:
+            result = "Talep süresi dolmuş veya daha önce karara bağlanmış."
+        self.answer_callback(callback.get("id"), result)
+        try:
+            self.send_message(chat_id, f"{result}\nTalep: {approval_id}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"telegram: confirm failed; error_type={type(exc).__name__}", flush=True)
+        return True
+
     def handle_update(self, update):
+        if update.get("callback_query"):
+            return self.handle_callback(update["callback_query"])
         message = update.get("message") or update.get("edited_message")
         if not message:
             return False
@@ -51,7 +87,16 @@ class TelegramIntake:
         command, _, argument = text.partition(" ")
         command = command.split("@", 1)[0].lower()
         if command in ("/start", "/help"):
-            self.send_message(chat_id, "AI Company görev botu hazır.\nYeni görev: /task Görev açıklaması\nBu bot yalnızca görev kaydeder; görevleri çalıştırmaz.")
+            self.send_message(chat_id, "AI Company görev botu hazır.\nYeni görev: /task Görev açıklaması\nBekleyen onaylar: /approvals\nBu bot görev kaydeder ve onay kararlarını kaydeder; görevleri çalıştırmaz.")
+            return True
+        if command == "/approvals":
+            from .notifier import approval_keyboard, format_approval_message
+            pending = self.store.list_approval_requests(status="pending", limit=10)
+            if not pending:
+                self.send_message(chat_id, "Bekleyen onay yok.")
+            for item in pending:
+                self._api("sendMessage", {"chat_id": chat_id, "text": format_approval_message(item)[:3800],
+                                          "reply_markup": json.dumps(approval_keyboard(item["approval_id"]))})
             return True
         if command == "/task":
             if not argument.strip():
@@ -67,7 +112,7 @@ class TelegramIntake:
         """Read pending updates and return only numeric chat IDs, never message text."""
         updates = self._api(
             "getUpdates",
-            {"timeout": 0, "allowed_updates": json.dumps(["message"])},
+            {"timeout": 0, "allowed_updates": json.dumps(["message", "callback_query"])},
             timeout=10
         )
         ids = {
@@ -88,7 +133,7 @@ class TelegramIntake:
         offset = None
         backoff = 5
         while stop_event is None or not stop_event.is_set():
-            payload = {"timeout": 25, "allowed_updates": json.dumps(["message"])}
+            payload = {"timeout": 25, "allowed_updates": json.dumps(["message", "callback_query"])}
             if offset is not None:
                 payload["offset"] = offset
             try:
