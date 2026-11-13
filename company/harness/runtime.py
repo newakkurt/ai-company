@@ -98,6 +98,8 @@ def _generate(provider, agent, system_prompt: str, prompt: str) -> str:
         verify=lambda output: verify_output(output, min_chars=1),
     )
     if outcome.status != "ok":
+        if outcome.last_exception is not None:
+            raise outcome.last_exception
         raise RuntimeError(
             "agent generation escalated for human review; "
             f"review_id={outcome.review_id}; attempts={outcome.attempts}"
