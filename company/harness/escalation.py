@@ -225,6 +225,15 @@ class Outcome:
     last_exception: Exception | None = None
 
 
+class HumanReviewRequired(RuntimeError):
+    """A policy or verification gate placed this task in the human queue."""
+
+    def __init__(self, review_id: str, attempts: int = 0):
+        self.review_id = review_id
+        self.attempts = attempts
+        super().__init__(f"human review required; review_id={review_id}; attempts={attempts}")
+
+
 def run_with_retries(func, *, task_id: str, description: str = "", queue: HumanReviewQueue | None = None,
                      max_attempts: int = MAX_ATTEMPTS, verify=None, sleeper=None,
                      raise_last_exception: bool = False) -> Outcome:
@@ -260,5 +269,9 @@ def run_with_retries(func, *, task_id: str, description: str = "", queue: HumanR
     review_id = queue.enqueue(task_id, "retry_budget_exhausted",
                               {"description": description[:500], "errors": errors}, [], max_attempts)
     if raise_last_exception and last_exception is not None:
+        try:
+            setattr(last_exception, "human_review_id", review_id)
+        except Exception:
+            pass
         raise last_exception
     return Outcome("escalated", None, max_attempts, errors, review_id, last_exception)
