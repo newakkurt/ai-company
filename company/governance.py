@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 import threading
+from datetime import datetime, timezone
 import time
 from dataclasses import dataclass
 from typing import Mapping
@@ -173,3 +174,38 @@ class CircuitBreaker:
                 "threshold": self.threshold,
                 "reset_seconds": self.reset_seconds,
             }
+
+
+def block_claimed_task(store, task_id: str, reason: str) -> bool:
+    """Move a claimed task to a terminal blocked state and append an audit event."""
+    now = datetime.now(timezone.utc).isoformat()
+    details = {"reason": str(reason)[:120], "execution": "not_started"}
+    if hasattr(store, "_request"):
+        changed = store._request(
+            "tasks", "PATCH",
+            {"task_id": f"eq.{task_id}", "status": "eq.running"},
+            {"status": "blocked", "updated_at": now},
+            "return=representation",
+        )
+        if not changed:
+            return False
+        store._request(
+            "assignments", "PATCH",
+            {"task_id": f"eq.{task_id}", "status": "in.(suggested,running)"},
+            {"status": "blocked"}, "return=minimal",
+        )
+        store._event(task_id, "agent_task_blocked", "governance", details)
+        return True
+    with store._connect() as db:
+        changed = db.execute(
+            "UPDATE tasks SET status='blocked', updated_at=? WHERE task_id=? AND status='running'",
+            (now, task_id),
+        ).rowcount
+        if not changed:
+            return False
+        db.execute(
+            "UPDATE assignments SET status='blocked' WHERE task_id=? AND status IN ('suggested','running')",
+            (task_id,),
+        )
+        store._event(db, task_id, "agent_task_blocked", "governance", details)
+        return True
