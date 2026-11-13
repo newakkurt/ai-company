@@ -63,11 +63,12 @@ def run_supervised(stop_event=None, poll_seconds: int = 15,
             backoff = min(max_backoff_seconds, backoff * 2)
 
 
-def _escalate_to_human(task_id: str, reason: str, error_type: str):
-    """Put work automation must not decide alone into the SQLite human review queue."""
+def _escalate_to_human(task_id: str, reason: str, error_type: str, review_id: str | None = None):
+    """Persist review-required work and append its escalation to the trace."""
     try:
         from .harness.escalation import HumanReviewQueue
-        review_id = HumanReviewQueue().enqueue(task_id, reason, {"error_type": error_type})
+        if review_id is None:
+            review_id = HumanReviewQueue().enqueue(task_id, reason, {"error_type": error_type})
         safe_record(task_id, "failed", "escalated", reason, review_id=review_id)
         print(f"agent_worker: escalated to human; task_id={task_id}; review_id={review_id}", flush=True)
     except Exception as exc:  # noqa: BLE001 - escalation is best-effort and must not mask the failure
@@ -254,6 +255,10 @@ def process_one_task(store=None, provider=None):
         safe_record(task_id, "running", "failed", "exception", error_type=type(exc).__name__)
         if isinstance(exc, PrivacyRoutingError):
             _escalate_to_human(task_id, "privacy_routing_blocked", type(exc).__name__)
+        else:
+            review_id = getattr(exc, "human_review_id", None) or getattr(exc, "review_id", None)
+            if review_id:
+                _escalate_to_human(task_id, "human_review_required", type(exc).__name__, review_id=review_id)
         # Only log the exception class. Never emit provider responses or credentials.
         try:
             store.fail_task(
