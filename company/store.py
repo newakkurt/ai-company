@@ -212,8 +212,8 @@ class SupabaseTaskStore:
         self.requeue_stale_tasks()
         rows = self._request("tasks", params={
             "select": "task_id", "status": "eq.planned",
-            "execution_mode": "eq.dry_run", "order": "created_at.asc",
-            "limit": "1",
+            "execution_mode": "eq.dry_run", "approval_required": "eq.false",
+            "order": "created_at.asc", "limit": "1",
         })
         if not rows:
             return None
@@ -244,8 +244,8 @@ class SupabaseTaskStore:
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
         rows = self._request("tasks", params={
             "select": "task_id", "status": "eq.running",
-            "execution_mode": "eq.dry_run", "updated_at": f"lt.{cutoff}",
-            "order": "updated_at.asc", "limit": "20",
+            "execution_mode": "eq.dry_run", "approval_required": "eq.false",
+            "updated_at": f"lt.{cutoff}", "order": "updated_at.asc", "limit": "20",
         })
         requeued = 0
         for row in rows:
