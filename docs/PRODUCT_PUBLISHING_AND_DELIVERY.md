@@ -27,7 +27,7 @@ If the BMC products are listed under Shop, set `BMC_EXTRA_PRODUCT_MAP` in Render
 }
 ```
 
-Also configure `BMC_WEBHOOK_SECRET` and `APP_PUBLIC_URL`. If the items are membership tiers rather than Shop items, use `BMC_PRODUCT_LEVEL_MAP` instead.
+Also configure `BMC_WEBHOOK_SECRET` and `APP_PUBLIC_URL`. A recurring PRO membership needs the actual `BMC_PRO_MEMBERSHIP_LEVEL_ID`; `BMC_PRODUCT_LEVEL_MAP` is for additional membership-tier mappings. A one-time coffee/support payment must not grant recurring PRO access.
 
 ## Delivery behavior
 
