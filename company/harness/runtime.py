@@ -55,7 +55,7 @@ def generate_with_context(provider, agent, system_prompt: str, user_prompt: str)
     if not match:
         return first
     try:
-        request = json.loads(match.group(1))
+        decoder = json.JSONDecoder()\n        request, _end = decoder.raw_decode(first[match.end():].lstrip())
     except (TypeError, ValueError):
         return "Tool request rejected: invalid JSON.\n" + first
     name = request.get("name")
