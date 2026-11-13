@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 from .context_gate import select_context
-from .escalation import HumanReviewQueue, verify_output
+from .escalation import HumanReviewQueue, run_with_retries, verify_output
 from .routing import Tier
 from .tools import ToolBox
 
@@ -81,10 +81,24 @@ def _task_id(prompt: str) -> str:
 
 def _generate(provider, agent, system_prompt: str, prompt: str) -> str:
     use_search = agent.id in {"research_intelligence", "marketing_growth", "product_business"} and getattr(provider, "supports_search", False)
-    if getattr(provider, "tiered", False) is True:
-        from .routing import infer_task_kind
-        return provider.generate(system_prompt, prompt, use_search=use_search,
-                                 task_kind=infer_task_kind(agent.id, use_search))
-    if use_search:
-        return provider.generate(system_prompt, prompt, use_search=True)
-    return provider.generate(system_prompt, prompt)
+
+    def call_once():
+        if getattr(provider, "tiered", False) is True:
+            from .routing import infer_task_kind
+            return provider.generate(system_prompt, prompt, use_search=use_search,
+                                     task_kind=infer_task_kind(agent.id, use_search))
+        if use_search:
+            return provider.generate(system_prompt, prompt, use_search=True)
+        return provider.generate(system_prompt, prompt)
+
+    outcome = run_with_retries(
+        call_once, task_id=_task_id(prompt), description=prompt,
+        queue=HumanReviewQueue(),
+        verify=lambda output: verify_output(output, min_chars=1),
+    )
+    if outcome.status != "ok":
+        raise RuntimeError(
+            "agent generation escalated for human review; "
+            f"review_id={outcome.review_id}; attempts={outcome.attempts}"
+        )
+    return outcome.result
