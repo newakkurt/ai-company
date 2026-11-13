@@ -53,6 +53,7 @@ class AgentRunnerTests(unittest.TestCase):
         prompt = build_system_prompt(content_agent)
         self.assertIn("write the complete requested artifact itself", prompt)
         self.assertIn("Do not substitute a plan", prompt)
+        self.assertIn("Never infer product capabilities", prompt)
 
     def test_non_content_roles_keep_structured_report_guidance(self):
         from company.agents import load_agents
