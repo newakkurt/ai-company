@@ -40,8 +40,10 @@ class GovernanceTests(unittest.TestCase):
         self.assertFalse(breaker.allow_request(now=103))
         self.assertEqual(breaker.status(now=103)["state"], "open")
         self.assertTrue(breaker.allow_request(now=113))
+        breaker.record_failure(now=114)
+        self.assertFalse(breaker.allow_request(now=115))
         breaker.record_success()
-        self.assertEqual(breaker.status(now=114)["state"], "closed")
+        self.assertEqual(breaker.status(now=116)["state"], "closed")
 
     def test_snapshot_does_not_claim_budget_enforcement(self):
         snapshot = governance_snapshot({"AI_COMPANY_MONTHLY_SPEND_LIMIT_USD": "0"})
