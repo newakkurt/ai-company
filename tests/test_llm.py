@@ -60,6 +60,29 @@ class GeminiProviderTests(unittest.TestCase):
             self.assertEqual(provider.generate("system", "user"), "Groq OK")
         self.assertEqual(request.call_args.args[0].get_header("Authorization"), "Bearer groq-test-key")
 
+
+    def test_groq_tpm_429_waits_and_retries_once(self):
+        rate_limit = HTTPError(
+            GroqProvider.ENDPOINT,
+            429,
+            "Too Many Requests",
+            {"Retry-After": "60"},
+            io.BytesIO(b'{"error":{"message":"Rate limit reached for tokens per minute"}}'),
+        )
+        success = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
+        with patch("company.llm.urlopen", side_effect=[rate_limit, success]):
+            with patch("company.llm.time.sleep") as sleep:
+                provider = GroqProvider(api_key="groq-test-key")
+                self.assertEqual(provider.generate("system", "user"), "Groq OK")
+        sleep.assert_called_once_with(60)
+
+    def test_groq_uses_a_small_default_output_budget(self):
+        response = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
+        with patch("company.llm.urlopen", return_value=response) as request:
+            GroqProvider(api_key="groq-test-key").generate("system", "user")
+        payload = json.loads(request.call_args.args[0].data.decode("utf-8"))
+        self.assertLessEqual(payload["max_tokens"], 1024)
+
     def test_groq_http_error_exposes_status_and_safe_provider_message(self):
         response = io.BytesIO(b'{"error":{"message":"Invalid API Key"}}')
         error = HTTPError(
