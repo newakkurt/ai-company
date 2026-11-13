@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 from .context_gate import select_context
-from .escalation import HumanReviewQueue, run_with_retries, verify_output
+from .escalation import HumanReviewQueue, HumanReviewRequired, run_with_retries, verify_output
 from .routing import Tier
 from .tools import ToolBox
 
@@ -101,8 +101,5 @@ def _generate(provider, agent, system_prompt: str, prompt: str) -> str:
     if outcome.status != "ok":
         if outcome.last_exception is not None:
             raise outcome.last_exception
-        raise RuntimeError(
-            "agent generation escalated for human review; "
-            f"review_id={outcome.review_id}; attempts={outcome.attempts}"
-        )
+        raise HumanReviewRequired(outcome.review_id or "unknown", outcome.attempts)
     return outcome.result
