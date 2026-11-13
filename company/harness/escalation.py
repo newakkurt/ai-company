@@ -222,6 +222,7 @@ class Outcome:
     attempts: int = 0
     errors: list = field(default_factory=list)
     review_id: str | None = None
+    last_exception: Exception | None = None
 
 
 def run_with_retries(func, *, task_id: str, description: str = "", queue: HumanReviewQueue | None = None,
@@ -239,6 +240,7 @@ def run_with_retries(func, *, task_id: str, description: str = "", queue: HumanR
                                   categories, 0)
         return Outcome("escalated", None, 0, [], review_id)
     errors: list[str] = []
+    last_exception = None
     for attempt in range(1, max_attempts + 1):
         try:
             result = func()
@@ -247,9 +249,13 @@ def run_with_retries(func, *, task_id: str, description: str = "", queue: HumanR
                 return Outcome("ok", result, attempt, errors)
             errors.append("verification_failed:" + ",".join(check.reasons))
         except Exception as exc:  # noqa: BLE001 - recorded by class only
+            from .routing import PrivacyRoutingError
+            if isinstance(exc, PrivacyRoutingError):
+                raise
+            last_exception = exc
             errors.append(type(exc).__name__)
         if sleeper and attempt < max_attempts:
             sleeper(min(2 ** attempt, 30))
     review_id = queue.enqueue(task_id, "retry_budget_exhausted",
                               {"description": description[:500], "errors": errors}, [], max_attempts)
-    return Outcome("escalated", None, max_attempts, errors, review_id)
+    return Outcome("escalated", None, max_attempts, errors, review_id, last_exception)
