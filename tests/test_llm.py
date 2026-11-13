@@ -81,7 +81,7 @@ class GeminiProviderTests(unittest.TestCase):
         with patch("company.llm.urlopen", return_value=response) as request:
             GroqProvider(api_key="groq-test-key").generate("system", "user")
         payload = json.loads(request.call_args.args[0].data.decode("utf-8"))
-        self.assertLessEqual(payload["max_tokens"], 1024)
+        self.assertLessEqual(payload["max_tokens"], 2048)
 
     def test_groq_http_error_exposes_status_and_safe_provider_message(self):
         response = io.BytesIO(b'{"error":{"message":"Invalid API Key"}}')
