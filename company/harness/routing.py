@@ -283,7 +283,9 @@ class TieredProvider:
             return output
         decision.error = "all_eligible_tiers_failed"
         self._record(decision)
-        if last_error is not None:\n            raise last_error\n        raise PrivacyRoutingError("No eligible model tier after safety and memory checks")
+        if last_error is not None:
+            raise last_error
+        raise PrivacyRoutingError("No eligible model tier after safety and memory checks")
 
     @staticmethod
     def _call(provider, system_prompt, user_prompt, use_search, max_tokens):
