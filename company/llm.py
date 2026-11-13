@@ -34,7 +34,7 @@ class GeminiProvider:
     supports_search = True
 
     def __init__(self, api_key=None, model=None, timeout=45):
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        self.api_key = str(api_key if api_key is not None else os.getenv("GEMINI_API_KEY", "")).strip()
         self.model = model or os.getenv("AI_COMPANY_GEMINI_MODEL", self.DEFAULT_MODEL)
         self.timeout = timeout
 
@@ -182,7 +182,7 @@ class GroqProvider:
     ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
 
     def __init__(self, api_key=None, model=None, timeout=45):
-        self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
+        self.api_key = str(api_key if api_key is not None else os.getenv("GROQ_API_KEY", "")).strip()
         self.model = model or os.getenv("GROQ_MODEL", self.DEFAULT_MODEL)
         self.timeout = timeout
 
@@ -301,8 +301,10 @@ class FallbackProvider:
 
 def _get_cloud_provider():
     """Prefer Gemini; use Groq as a quota-safe fallback when its key is configured."""
-    gemini = GeminiProvider() if os.getenv("GEMINI_API_KEY") else None
-    groq = GroqProvider() if os.getenv("GROQ_API_KEY") else None
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    gemini = GeminiProvider(api_key=gemini_key) if gemini_key else None
+    groq = GroqProvider(api_key=groq_key) if groq_key else None
     if gemini and groq:
         return FallbackProvider(gemini, groq)
     if gemini:
