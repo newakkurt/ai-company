@@ -99,17 +99,29 @@ class HumanReviewQueue:
                     return row["approval_id"]
             review_id = "review-" + uuid.uuid4().hex
             now = datetime.now(timezone.utc)
-            self._store._request("approval_requests", "POST", body={
-                "approval_id": review_id, "action": "human_review",
-                "scope_json": {
-                    "task_id": task_id, "reason": reason,
-                    "categories": categories or [], "attempts": attempts,
-                    "payload": safe_payload,
-                },
-                "requested_by": "agent_harness", "status": "pending",
-                "requested_at": now.isoformat(),
-                "expires_at": (now + timedelta(days=365)).isoformat(),
-            }, prefer="return=minimal")
+            try:
+                self._store._request("approval_requests", "POST", body={
+                    "approval_id": review_id, "action": "human_review",
+                    "scope_json": {
+                        "task_id": task_id, "reason": reason,
+                        "categories": categories or [], "attempts": attempts,
+                        "payload": safe_payload,
+                    },
+                    "requested_by": "agent_harness", "status": "pending",
+                    "requested_at": now.isoformat(),
+                    "expires_at": (now + timedelta(days=365)).isoformat(),
+                }, prefer="return=minimal")
+            except Exception:
+                # A concurrent worker may have won the partial unique index.
+                rows = self._store._request("approval_requests", params={
+                    "select": "approval_id,scope_json,status", "action": "eq.human_review",
+                    "status": "eq.pending", "order": "requested_at.desc", "limit": "500",
+                })
+                for row in rows:
+                    scope = row.get("scope_json") or {}
+                    if scope.get("task_id") == task_id and scope.get("reason") == reason:
+                        return row["approval_id"]
+                raise
             return review_id
 
         review_id = "rev-" + uuid.uuid4().hex[:12]
