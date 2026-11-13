@@ -93,6 +93,7 @@ jobs:
                           "database_backend": database["backend"],
                           "mode": data["mode"],
                           "worker": worker,
+                          "commerce": data.get("commerce") or {},
                           "worker_mode": (
                               "embedded_render" if embedded_worker
                               else "github_actions_schedule"
