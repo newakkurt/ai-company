@@ -102,6 +102,7 @@ GitHub Actions, Python 3.10 / 3.11 / 3.12 üzerinde testleri çalıştırır.
 - [Sales and billing](docs/SALES_AND_BILLING.md)
 - [Product publishing and delivery](docs/PRODUCT_PUBLISHING_AND_DELIVERY.md)
 - [Security](docs/SECURITY.md)
+- [Agent Harness Constitution](docs/AGENT_HARNESS_CONSTITUTION.md)
 
 
 ## Read-only network configuration audit
