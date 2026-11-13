@@ -51,7 +51,7 @@ class GeminiProviderTests(unittest.TestCase):
 
 
     def test_normalize_api_key_removes_whitespace_and_matching_quotes(self):
-        self.assertEqual(normalize_api_key('  "gsk-example-key"  \\n'), "gsk-example-key")
+        self.assertEqual(normalize_api_key('  "gsk-example-key"  \n'), "gsk-example-key")
 
     def test_groq_api_key_is_trimmed_before_auth_header(self):
         response = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
