@@ -375,6 +375,7 @@ def main():
         parser.error("--poll-seconds must be at least 5")
 
     if args.once:
+        print("agent_worker: starting single-task cycle", flush=True)
         store = TaskStore()
         try:
             from .crm import verify_unchecked_companies
