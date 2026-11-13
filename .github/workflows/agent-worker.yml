@@ -52,8 +52,8 @@ jobs:
               "SUPABASE_ANON_KEY",
               "SUPABASE_DB_GATE_KEY",
           )
-          missing = [key for key in required if not os.getenv(key)]
-          if not (os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY")):
+          missing = [key for key in required if not os.getenv(key, "").strip()]
+          if not (os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GROQ_API_KEY", "").strip()):
               missing.append("GEMINI_API_KEY or GROQ_API_KEY")
           ready = not missing
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
