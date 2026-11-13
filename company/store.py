@@ -8,7 +8,7 @@ import os
 import sqlite3
 import uuid
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,13 +28,42 @@ class SupabaseTaskStore:
     """Server-side PostgREST client protected by a private pre-request API-key gate."""
 
     def __init__(self):
-        self.base_url = os.environ["SUPABASE_URL"].rstrip("/") + "/rest/v1"
+        # SUPABASE_URL must be the project API origin only. Do not silently
+        # rewrite its hostname: log the actual host so deployment mistakes
+        # can be diagnosed without exposing any credentials.
+        raw_url = os.environ["SUPABASE_URL"].strip().rstrip("/")
+        parsed = urlsplit(raw_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "SUPABASE_URL must be the HTTPS project origin only "
+                "(for example: https://<project-ref>.supabase.co), "
+                "without /rest/v1, table paths, query strings, or credentials"
+            )
+        self.api_origin = f"{parsed.scheme}://{parsed.netloc}"
+        self.base_url = self.api_origin + "/rest/v1"
+        self.supabase_host = parsed.hostname
         self.anon_key = os.environ["SUPABASE_ANON_KEY"]
         self.db_gate_key = os.environ["SUPABASE_DB_GATE_KEY"]
 
     def _request(self, table, method="GET", params=None, body=None, prefer=None):
         query = urlencode(params or {}, doseq=True)
         url = f"{self.base_url}/{table}" + (f"?{query}" if query else "")
+        request_path = urlsplit(url).path
+        # Safe diagnostic: never print API keys, authorization headers, bodies,
+        # or query values. This confirms the exact host/path used by the worker.
+        print(
+            f"[supabase] request method={method} "
+            f"host={self.supabase_host} path={request_path}",
+            flush=True,
+        )
         headers = {
             "apikey": self.anon_key,
             "Authorization": f"Bearer {self.anon_key}",
@@ -52,8 +81,21 @@ class SupabaseTaskStore:
                 raw = response.read()
         except HTTPError as exc:
             detail = exc.read(2048).decode("utf-8", errors="replace")
-            raise RuntimeError(f"Supabase database request failed ({exc.code}): {detail}") from exc
+            print(
+                f"[supabase] response status={exc.code} "
+                f"host={self.supabase_host} path={request_path} error={detail}",
+                flush=True,
+            )
+            raise RuntimeError(
+                f"Supabase database request failed "
+                f"(HTTP {exc.code}, host={self.supabase_host}, path={request_path}): {detail}"
+            ) from exc
         except (URLError, TimeoutError) as exc:
+            print(
+                f"[supabase] connection_error host={self.supabase_host} "
+                f"path={request_path} type={type(exc).__name__}",
+                flush=True,
+            )
             raise RuntimeError("Supabase database is temporarily unreachable") from exc
         if not raw:
             return []
