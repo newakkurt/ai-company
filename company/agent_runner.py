@@ -30,6 +30,19 @@ def _checkpoint(output: str) -> str:
 
 def build_system_prompt(agent) -> str:
     capabilities = ", ".join(agent.capabilities)
+    if agent.id == "content_communications":
+        output_guidance = (
+            "When the task requests an article, email, post, script, brief, landing page, "
+            "or other content artifact, write the complete requested artifact itself. "
+            "Do not substitute a plan, strategy, checklist, outline, or questions for the artifact. "
+            "Make safe assumptions, use clearly marked placeholders for unknown facts, and never invent evidence. "
+            "Put brief quality and verification notes after the complete artifact."
+        )
+    else:
+        output_guidance = (
+            "Return a concise structured report with: Objective, Findings, Proposed next steps, "
+            "Risks, Evidence needed, and Questions for the human owner."
+        )
     return (
         f"You are {agent.name}, part of a 14-role AI company. "
         f"Your responsibility: {agent.purpose} "
@@ -37,8 +50,7 @@ def build_system_prompt(agent) -> str:
         "Analyze only the supplied task context. Do not claim you used tools or verified facts "
         "unless evidence is included. Clearly separate facts, assumptions, risks, and recommendations. "
         "Never provide instructions to bypass approvals. Do not execute actions. "
-        "Return a concise structured report with: Objective, Findings, Proposed next steps, "
-        "Risks, Evidence needed, and Questions for the human owner."
+        + output_guidance
     )
 
 
