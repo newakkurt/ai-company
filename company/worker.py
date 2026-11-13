@@ -17,6 +17,10 @@ from .source_verification import verify_public_source
 from .notifier import notify_owner, notify_task_failed, notify_task_result
 from .scheduler import seed_due_tasks
 from .store import TaskStore
+from .governance import (
+    CircuitBreaker, GovernanceError, block_claimed_task,
+    kill_switch_enabled, require_safe_model_route,
+)
 
 REQUIRED_ENV = (
     "SUPABASE_URL",
@@ -26,6 +30,7 @@ REQUIRED_ENV = (
 SEED_INTERVAL_SECONDS = 300
 
 _SUPERVISOR_STATE = {"restart_count": 0, "last_restart_at": None, "last_error_type": None}
+_PROVIDER_BREAKER = CircuitBreaker()
 
 
 def supervisor_status():
@@ -127,15 +132,28 @@ def _start_task_heartbeat(store, task_id: str, interval_seconds: int = 60):
 
 def process_one_task(store=None, provider=None):
     """Claim and execute at most one dry-run task, persisting every agent result."""
+    if kill_switch_enabled():
+        return {"status": "paused", "reason": "kill_switch"}
+    if not _PROVIDER_BREAKER.allow_request():
+        return {"status": "paused", "reason": "provider_circuit_open"}
     store = store or TaskStore()
     task_id = store.claim_next_task()
     if not task_id:
         return {"status": "idle"}
 
+    task = store.get_task(task_id) or {}
+    try:
+        require_safe_model_route(task.get("description", ""))
+    except GovernanceError as exc:
+        block_claimed_task(store, task_id, str(exc))
+        print(f"agent_worker: blocked task {task_id}; reason={str(exc)}", flush=True)
+        return {"status": "blocked", "task_id": task_id, "reason": str(exc)}
+
     print(f"agent_worker: claimed task {task_id}", flush=True)
     heartbeat_stop, heartbeat_thread = _start_task_heartbeat(store, task_id)
     try:
         results = run_task(task_id, store=store, provider=provider)
+        _PROVIDER_BREAKER.record_success()
         # Save research leads only when the model emits the requested JSON block
         # and provides a public HTTPS source. Records remain unverified drafts.
         if task_id.startswith(("auto-prospects-", "crm-research-")):
@@ -212,6 +230,7 @@ def process_one_task(store=None, provider=None):
             "output_count": len(results),
         }
     except Exception as exc:
+        _PROVIDER_BREAKER.record_failure()
         # Only log the exception class. Never emit provider responses or credentials.
         try:
             store.fail_task(
