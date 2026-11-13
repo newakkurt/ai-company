@@ -3,7 +3,7 @@
 | Prensip | Modül | Zorlama |
 |---|---|---|
 | 1 Kademeli yönlendirme + gizlilik | `harness/privacy.py`, `harness/routing.py` | `TieredProvider` hassas veriyi buluttan keser; uygun tier yoksa `PrivacyRoutingError` → insan kuyruğu |
-| 2 Durum makinesi + izlenebilirlik | `harness/state_machine.py` | `TRANSITIONS` tablosu; `data/traces/<task>.jsonl` hash zinciri; `ai-company trace <id> --verify` |
+| 2 Durum makinesi + izlenebilirlik | `harness/state_machine.py` | `TRANSITIONS` tablosu; Hosted modda Supabase `events` tablosunda, yerelde `data/traces/<task>.jsonl` dosyasında hash zinciri; `ai-company trace <id> --verify` |
 | 3 Kontrol noktası + HITL | `harness/escalation.py`, `harness/safety.py` | `verify_output`, `check_command`, `run_with_retries` (≤3), `HumanReviewQueue` (Supabase `approval_requests` when hosted; SQLite for local development) |
 | 4 Bağlam / bellek | `harness/context_gate.py`, `harness/runtime.py` | Çalışan ajan çağrısında dinamik kural/araç seçimi; token sınırı |
 | 5 Dar kapsam | `harness/tools.py`, `harness/runtime.py` | Ajan döngüsüne bağlı sandbox araçları; tek araç çağrısı/yanıt turu; shell varsayılan KAPALI |
@@ -40,7 +40,7 @@ python -m company.cli trace <task_id> --verify
   kuyruk için kalıcı disk veya Supabase tablosu gerekir.
 - Yerel model gerçek uçtan uca testi bu ortamda yapılmadı (GPU/Ollama yok); `LocalProvider` HTTP sözleşmesi
   ve yönlendirme mantığı birim testlerle doğrulandı.
-- Durum makinesi mevcut `tasks.status` sütununu değiştirmez; ek iz kayıtları artık yasal geçişleri zorunlu kılar. Supabase görev durumu ile iz dosyası henüz tek atomik işlem değildir.
+- Durum makinesi mevcut `tasks.status` sütununu değiştirmez; ek iz kayıtları artık yasal geçişleri zorunlu kılar. Hosted izler Supabase `events` tablosunda kalıcıdır; görev satırı güncellemesi ve iz kaydı tek atomik transaction değildir.
 - Hosted modda insan inceleme kuyruğu mevcut Supabase `approval_requests` tablosunu ve aynı `SUPABASE_DB_GATE_KEY` yetki kapısını kullanır; yerel geliştirmede SQLite kullanılır. Yeni tablo veya herkese açık API yetkisi açılmaz.
 - Ajan araç döngüsü yalnızca bir araç çağrısı yapar; araç çıktısı doğrulanır ve modelden sonuç özeti istenir. Shell varsayılan kapalıdır; yüksek riskli komutlar kuyruğa alınır.
 
