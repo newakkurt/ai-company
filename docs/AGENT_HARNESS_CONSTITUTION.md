@@ -30,7 +30,7 @@ Not yet active: local model inference (no Ollama adapter), persistent provider-s
 
 - `AI_COMPANY_KILL_SWITCH=true`: pause worker task processing.
 - `OLLAMA_BASE_URL` and `AI_COMPANY_LOCAL_MODEL`: declare a local model endpoint/model; this alone does not activate local inference until an adapter exists.
-- `AI_COMPANY_DAILY_TASK_LIMIT`: worker-enforced daily task creation/processing cap (default 20; counts the latest 100 task records).
+- `AI_COMPANY_DAILY_TASK_LIMIT`: worker-enforced daily task processing cap (default 20; counts the latest 100 task records).
 - `AI_COMPANY_MONTHLY_SPEND_LIMIT_USD`: intended monthly spend cap (default 0; currently reporting/configuration only, not enforced until provider usage metering is implemented).
 - Existing `AI_COMPANY_API_KEY`, Supabase and provider secrets remain in Render's secret environment only.
 
