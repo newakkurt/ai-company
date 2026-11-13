@@ -216,17 +216,22 @@ class GroqProvider:
             with urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
+            raw_body = exc.read(2048).decode("utf-8", errors="replace").strip()
             detail = ""
             try:
-                error_body = json.loads(exc.read(2048).decode("utf-8", errors="replace"))
-                error_object = error_body.get("error") or {}
+                error_body = json.loads(raw_body)
+                error_object = error_body.get("error") if isinstance(error_body, dict) else None
                 if isinstance(error_object, dict):
                     detail = str(error_object.get("message") or error_object.get("type") or "")
+                elif isinstance(error_object, str):
+                    detail = error_object
             except (ValueError, TypeError, AttributeError):
-                pass
+                detail = raw_body
             detail = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~-]+", "Bearer [redacted]", detail)
             detail = re.sub(r"(?i)(api[_ -]?key\s*[:=]\s*)[^\s,;]+", r"\1[redacted]", detail)
-            suffix = f"; provider_message={detail[:200]}" if detail else ""
+            detail = re.sub(r"gsk_[A-Za-z0-9_-]{12,}", "[redacted]", detail)
+            detail = re.sub(r"\s+", " ", detail).strip()
+            suffix = f"; provider_message={detail[:180]}" if detail else ""
             raise GroqAPIError(f"Groq API returned HTTP {int(exc.code)}{suffix}") from exc
         except (URLError, TimeoutError) as exc:
             raise GroqAPIError(
