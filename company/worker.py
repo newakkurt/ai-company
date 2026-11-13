@@ -167,6 +167,7 @@ def process_one_task(store=None, provider=None):
     store = store or TaskStore()
     task_id = store.claim_next_task()
     if not task_id:
+        print("agent_worker: queue idle; no planned task", flush=True)
         return {"status": "idle"}
 
     print(f"agent_worker: claimed task {task_id}", flush=True)
