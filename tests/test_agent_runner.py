@@ -50,14 +50,14 @@ class AgentRunnerTests(unittest.TestCase):
     def test_content_role_writes_the_requested_artifact_not_only_a_plan(self):
         from company.agents import load_agents
         content_agent = next(agent for agent in load_agents() if agent.id == "content_communications")
-        prompt = build_system_prompt(content_agent, {"description": "Write the actual Turkish SEO article now."})
+        prompt = build_system_prompt(content_agent)
         self.assertIn("write the complete requested artifact itself", prompt)
         self.assertIn("Do not substitute a plan", prompt)
 
     def test_non_content_roles_keep_structured_report_guidance(self):
         from company.agents import load_agents
         ceo = next(agent for agent in load_agents() if agent.id == "ceo")
-        prompt = build_system_prompt(ceo, {"description": "Review the task."})
+        prompt = build_system_prompt(ceo)
         self.assertIn("Objective, Findings, Proposed next steps", prompt)
 
     def test_runner_rejects_unknown_task(self):
