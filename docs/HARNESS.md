@@ -36,11 +36,10 @@ python -m company.cli trace <task_id> --verify
 ## Sınırlar (dürüst durum)
 - Gizlilik taraması desen tabanlıdır (TC checksum, Luhn, IBAN, sır/anahtar, iç IP, anahtar kelime); isim/adres
   gibi serbest metin kişisel verileri yakalamaz. Kritik veri için `AI_COMPANY_ALLOW_CLOUD=false` kullan.
-- İnsan kuyruğu yerel SQLite'tır (`data/human_review.db`); Render Free'de dosya sistemi geçicidir, kalıcı
-  kuyruk için kalıcı disk veya Supabase tablosu gerekir.
+- İnsan kuyruğu hosted modda mevcut Supabase `approval_requests` tablosunda kalıcıdır; yerel geliştirmede SQLite (`data/human_review.db`) kullanılır.
 - Yerel model gerçek uçtan uca testi bu ortamda yapılmadı (GPU/Ollama yok); `LocalProvider` HTTP sözleşmesi
   ve yönlendirme mantığı birim testlerle doğrulandı.
-- Durum makinesi mevcut `tasks.status` sütununu değiştirmez; ek iz kayıtları artık yasal geçişleri zorunlu kılar. Hosted izler Supabase `events` tablosunda kalıcıdır; görev satırı güncellemesi ve iz kaydı tek atomik transaction değildir.
+- Durum makinesi mevcut `tasks.status` sütununu değiştirmez; geçersiz geçişler reddedilir. Hosted izler Supabase `events` tablosunda kalıcıdır; görev satırı güncellemesi ve iz kaydı tek atomik transaction değildir. İz yazma altyapısı hataları loglanır; görev durumu ile iz kaydı arasında tam atomiklik henüz yoktur.
 - Hosted modda insan inceleme kuyruğu mevcut Supabase `approval_requests` tablosunu ve aynı `SUPABASE_DB_GATE_KEY` yetki kapısını kullanır; yerel geliştirmede SQLite kullanılır. Yeni tablo veya herkese açık API yetkisi açılmaz.
 - Ajan araç döngüsü yalnızca bir araç çağrısı yapar; araç çıktısı doğrulanır ve modelden sonuç özeti istenir. Shell varsayılan kapalıdır; yüksek riskli komutlar kuyruğa alınır.
 
