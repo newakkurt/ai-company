@@ -224,7 +224,7 @@ def seed_due_tasks(store, now: datetime | None = None) -> list[str]:
             quota_failure = _is_quota_failure(existing)
             # Quota failures wait 24h without a fallback provider.
             # Once Groq is configured, resume after 30m and reuse saved outputs.
-            retry_limit = 3 if quota_failure else 2
+            retry_limit = 2  # initial attempt + at most two retries = three total attempts
             retry_delay = (30 if os.getenv("GROQ_API_KEY") else 1440) if quota_failure else 30
             requeued = store.requeue_failed_task(
                 task_id, max_retries=retry_limit, min_age_minutes=retry_delay
