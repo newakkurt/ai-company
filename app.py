@@ -206,6 +206,23 @@ def provider_status() -> dict[str, Any]:
     }
 
 
+
+def commerce_status() -> dict[str, Any]:
+    """Expose configuration presence only; never return secrets or customer data."""
+    smtp_keys = ("MAIL_SMTP_HOST", "MAIL_USER", "MAIL_PASSWORD", "MAIL_FROM")
+    return {
+        "bmc_webhook_configured": bool(os.getenv("BMC_WEBHOOK_SECRET")),
+        "bmc_shop_mapping_configured": bool(os.getenv("BMC_EXTRA_PRODUCT_MAP")),
+        "bmc_membership_level_configured": bool(os.getenv("BMC_PRO_MEMBERSHIP_LEVEL_ID")),
+        "bmc_product_mapping_configured": bool(os.getenv("BMC_PRODUCT_LEVEL_MAP")),
+        "smtp_configured": all(os.getenv(key) for key in smtp_keys),
+        "mail_mode": os.getenv("AI_COMPANY_MAIL_MODE", "draft").strip().lower() or "draft",
+        "telegram_owner_notifications_configured": bool(
+            os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_OWNER_CHAT_ID")
+        ),
+    }
+
+
 def database_status() -> dict[str, Any]:
     required = ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY")
     configured = {key: bool(os.getenv(key)) for key in required}
@@ -248,6 +265,7 @@ def readiness():
         "database": database,
         "worker": worker,
         "services": services_status(),
+        "commerce": commerce_status(),
         "mode": "analysis_only",
         "external_actions_enabled": False,
     }
