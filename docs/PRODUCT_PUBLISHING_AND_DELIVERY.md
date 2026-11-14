@@ -2,7 +2,7 @@
 
 Generated product releases remain `review_required`. They are not purchasable or downloadable until the owner publishes the exact artifact.
 
-## Publish a release
+## Offline runtime QA\n\nBefore requesting publication, run the manual GitHub Actions workflow **Offline Product Release QA**: [open workflow](https://github.com/newakkurt/ai-company/actions/workflows/product-offline-qa.yml). Select the exact `product_id` (the current ConfigGuard Lite release is `prd-1cdfbb2727ef`) and choose **Run workflow**. The workflow retrieves the stored artifact from Supabase, verifies its byte count and SHA-256, checks archive paths and source for unsafe patterns, then runs the package tests in an isolated Docker container with networking disabled. It does not modify `release_status`, create an approval, publish, or grant downloads. Review the complete successful run before continuing.\n\n## Publish a release
 
 1. Read the product's `product_id` and `sha256` from `GET /api/factory/products/{product_id}`.
 2. Create an approval request with action `publish_product` and scope exactly:
