@@ -67,6 +67,9 @@ def worker_status() -> dict[str, Any]:
 def start_embedded_worker() -> None:
     global _worker_thread
     if os.getenv("AI_COMPANY_EMBEDDED_WORKER", "").strip().lower() != "true":
+        # Make a silently disabled worker visible in the logs (queue would not drain on Render).
+        print("agent_worker: WARNING embedded worker disabled; set AI_COMPANY_EMBEDDED_WORKER=true "
+              "or rely on the GitHub Actions worker", flush=True)
         return
     with _worker_lock:
         if _worker_thread and _worker_thread.is_alive():
