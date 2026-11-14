@@ -129,11 +129,21 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
                 "\n\nSpecialist analysis (unverified suggestions; excerpts, full text is stored):\n"
                 + build_specialist_context(results)
             )
+        evidence_context = ""
+        if agent.id in SEARCH_AGENTS and not getattr(provider, "supports_search", False):
+            # No native grounding (e.g. Groq): give research roles real public demand signals
+            # as quoted evidence instead of letting them write market claims from memory.
+            from .research_sources import demand_evidence_block
+            evidence, count = demand_evidence_block()
+            print(f"agent_worker: web evidence items={count} agent={agent.id} task={task_id}", flush=True)
+            if evidence:
+                evidence_context = "\n\n" + evidence
         prompt = (
             f"Task ID: {task_id}\nTask description: {task['description']}\n"
             "Execution mode: dry_run. You are preparing analysis only. "
             "Do not modify files, call external services, publish, deploy, spend money, "
             "delete data, or change network devices."
+            f"{evidence_context}"
             f"{specialist_context}"
         )
         print(f"agent_worker: requesting agent={agent.id} task={task_id}", flush=True)

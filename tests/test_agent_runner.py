@@ -94,3 +94,29 @@ class CeoContextBudgetTests(unittest.TestCase):
             self.assertEqual(ceo_context_budget(), 2000)
         with patch.dict(os.environ, {"AI_COMPANY_CEO_CONTEXT_CHARS": "bad"}):
             self.assertEqual(ceo_context_budget(), 7000)
+
+
+class WebEvidenceInjectionTests(unittest.TestCase):
+    def _run(self, supports_search):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = TaskStore(Path(tmp.name) / "e.db")
+        task = store.create_task("Research demand for network config tools")
+        store.assign_agents(task["task_id"], ["research_intelligence", "qa_testing"])
+        provider = Mock()
+        provider.supports_search = supports_search
+        provider.tiered = False
+        provider.generate.return_value = "analysis"
+        with patch("company.research_sources.demand_evidence_block",
+                   return_value=("Live public evidence (retrieved X)\n- item | https://e.test/1", 1)):
+            run_task(task["task_id"], store=store, provider=provider)
+        return provider.generate.call_args_list
+
+    def test_research_role_gets_evidence_when_provider_cannot_search(self):
+        calls = self._run(False)
+        prompts = [c.args[1] for c in calls]
+        self.assertEqual(sum("Live public evidence" in p for p in prompts), 1)
+
+    def test_no_injection_when_provider_has_native_search(self):
+        calls = self._run(True)
+        self.assertFalse(any("Live public evidence" in c.args[1] for c in calls))
