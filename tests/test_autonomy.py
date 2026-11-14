@@ -69,6 +69,21 @@ class SchedulerTests(unittest.TestCase):
         self.assertIn("ceo", agents)
         self.assertIn("research_intelligence", agents)
 
+    def test_seeded_playbook_tasks_do_not_need_per_task_approval(self):
+        """Regression: seeded tasks used to be approval_required=True, so the Supabase
+        worker (which only claims approval_required=false) could never pick them up."""
+        now = datetime(2026, 11, 16, 8, 0, tzinfo=TR)
+        created = scheduler.seed_due_tasks(self.store, now=now)
+        self.assertTrue(created)
+        for task_id in created:
+            task = self.store.get_task(task_id)
+            self.assertFalse(task["approval_required"], task_id)
+            self.assertEqual(task["execution_mode"], "dry_run", task_id)
+
+    def test_manual_tasks_still_require_approval(self):
+        task = self.store.create_task("Manual task", task_id="task-manual-1")
+        self.assertTrue(task["approval_required"])
+
     def test_new_day_creates_rotating_daily_and_weekly_work(self):
         monday = datetime(2026, 11, 16, 8, 0, tzinfo=TR)
         scheduler.seed_due_tasks(self.store, now=monday)

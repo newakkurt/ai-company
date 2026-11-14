@@ -216,7 +216,9 @@ def seed_due_tasks(store, now: datetime | None = None) -> list[str]:
     for task_id, playbook in due_playbooks(now):
         existing = store.get_task(task_id)
         if existing is None:
-            store.create_task(playbook.description, task_id=task_id)
+            # Fixed, analysis-only playbooks (see _RULES): the worker may claim them without
+            # a per-task approval. Sending, publishing, spending and deploys stay gated.
+            store.create_task(playbook.description, task_id=task_id, approval_required=False)
             store.assign_agents(task_id, agents_for_playbook(playbook))
             created.append(task_id)
         elif existing["status"] == "failed":

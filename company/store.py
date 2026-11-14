@@ -111,7 +111,10 @@ class SupabaseTaskStore:
             "created_at": utc_now(),
         }, prefer="return=minimal")
 
-    def create_task(self, description: str, task_id: str | None = None) -> dict:
+    def create_task(self, description: str, task_id: str | None = None,
+                    approval_required: bool = True) -> dict:
+        """Create a dry-run task. Approval stays required unless a caller with a fixed,
+        analysis-only playbook (the scheduler) explicitly opts out."""
         description = description.strip()
         if not description:
             raise ValueError("Task description cannot be empty")
@@ -119,7 +122,8 @@ class SupabaseTaskStore:
         now = utc_now()
         self._request("tasks", "POST", {"on_conflict": "task_id"}, {
             "task_id": task_id, "description": description, "status": "planned",
-            "owner": "ceo", "execution_mode": "dry_run", "approval_required": True,
+            "owner": "ceo", "execution_mode": "dry_run",
+            "approval_required": bool(approval_required),
             "created_at": now, "updated_at": now,
         }, "resolution=ignore-duplicates,return=minimal")
         self._event(task_id, "task_created", "user", {"mode": "dry_run"})
@@ -713,7 +717,10 @@ class TaskStore:
         if "current_period_start" not in columns:
             db.execute("ALTER TABLE memberships ADD COLUMN current_period_start TEXT")
 
-    def create_task(self, description: str, task_id: str | None = None) -> dict:
+    def create_task(self, description: str, task_id: str | None = None,
+                    approval_required: bool = True) -> dict:
+        """Create a dry-run task. Approval stays required unless a caller with a fixed,
+        analysis-only playbook (the scheduler) explicitly opts out."""
         description = description.strip()
         if not description:
             raise ValueError("Task description cannot be empty")
@@ -724,8 +731,8 @@ class TaskStore:
                 """INSERT OR IGNORE INTO tasks
                 (task_id, description, status, owner, execution_mode,
                  approval_required, created_at, updated_at)
-                VALUES (?, ?, 'planned', 'ceo', 'dry_run', 1, ?, ?)""",
-                (task_id, description, now, now)
+                VALUES (?, ?, 'planned', 'ceo', 'dry_run', ?, ?, ?)""",
+                (task_id, description, 1 if approval_required else 0, now, now)
             )
             if cursor.rowcount:
                 self._event(db, task_id, "task_created", "user", {"mode": "dry_run"})
