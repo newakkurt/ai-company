@@ -77,7 +77,7 @@ class GeminiProviderTests(unittest.TestCase):
                 self.assertEqual(provider.generate("system", "user"), "Groq OK")
         sleep.assert_called_once_with(60)
 
-    def test_groq_tpm_413_waits_and_retries_once(self):
+    def test_groq_tpm_413_reduces_prompt_before_retry(self):
         rate_limit = HTTPError(
             GroqProvider.ENDPOINT,
             413,
@@ -86,12 +86,17 @@ class GeminiProviderTests(unittest.TestCase):
             io.BytesIO(b'{"error":{"message":"Requested 10000 tokens, limit 8000 tokens per minute"}}'),
         )
         success = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
-        with patch("company.llm.urlopen", side_effect=[rate_limit, success]) as request:
-            with patch("company.llm.time.sleep") as sleep:
-                provider = GroqProvider(api_key="groq-test-key")
-                self.assertEqual(provider.generate("system", "user"), "Groq OK")
-        self.assertEqual(request.call_count, 2)
-        sleep.assert_called_once_with(60)
+        prompts = []
+        def capture(request, timeout):
+            prompts.append(json.loads(request.data.decode("utf-8"))["messages"][1]["content"])
+            if len(prompts) == 1:
+                raise rate_limit
+            return success
+        with patch("company.llm.urlopen", side_effect=capture):
+            provider = GroqProvider(api_key="groq-test-key")
+            self.assertEqual(provider.generate("system", "A" * 30000), "Groq OK")
+        self.assertLess(len(prompts[1]), len(prompts[0]))
+        self.assertIn("Middle context excerpt omitted", prompts[1])
 
     def test_groq_system_prompt_states_that_no_tools_exist(self):
         response = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
