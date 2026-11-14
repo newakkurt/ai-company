@@ -121,7 +121,7 @@ class ProductReleaseStoreTests(unittest.TestCase):
         import hashlib
         with tempfile.TemporaryDirectory() as tmp:
             store = TaskStore(Path(tmp) / "fulfillment-expired.db")
-            artifact = b"zip-product-data"
+            artifact = make_zip()
             digest = hashlib.sha256(artifact).hexdigest()
             release = {
                 "product_id": "prd-fedcba654321", "name": "Unpublished",
