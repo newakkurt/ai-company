@@ -119,3 +119,63 @@ class TelegramApprovalTests(unittest.TestCase):
         text, markup = sent[0]
         self.assertNotIn("ali@example.com", text)
         self.assertEqual(len(markup["inline_keyboard"][0]), 2)
+
+
+class TelegramOwnerDashboardTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = TaskStore(Path(self.tmp.name) / "dashboard.db")
+        self.bot = TelegramIntake(token="test-token", allowed_chat_ids=["12345"], store=self.store)
+        self.bot.send_message = Mock()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def send(self, command):
+        return self.bot.handle_update({
+            "message": {"chat": {"id": 12345}, "text": command}
+        })
+
+    def test_status_reports_configuration_without_secrets(self):
+        with unittest.mock.patch.dict("os.environ", {
+            "GEMINI_API_KEY": "do-not-disclose",
+            "SUPABASE_URL": "https://example.supabase.co",
+            "SUPABASE_ANON_KEY": "anon-secret",
+            "SUPABASE_DB_GATE_KEY": "gate-secret",
+            "AI_COMPANY_EMBEDDED_WORKER": "false",
+            "AI_COMPANY_EMBEDDED_TELEGRAM": "true",
+        }, clear=True):
+            self.send("/status")
+        message = self.bot.send_message.call_args.args[1]
+        self.assertIn("AI anahtarı: var", message)
+        self.assertIn("Supabase ayarları: tam", message)
+        self.assertNotIn("do-not-disclose", message)
+        self.assertNotIn("anon-secret", message)
+        self.assertNotIn("gate-secret", message)
+
+    def test_agents_command_lists_registered_roles(self):
+        self.send("/agents")
+        message = self.bot.send_message.call_args.args[1]
+        self.assertIn("Uzman ajanlar (14)", message)
+        self.assertIn("ceo", message)
+
+    def test_tasks_command_shows_recent_task_without_sensitive_fields(self):
+        self.store.create_task("Review the network automation roadmap")
+        self.send("/tasks")
+        message = self.bot.send_message.call_args.args[1]
+        self.assertIn("Review the network automation roadmap", message)
+        self.assertNotIn("test-token", message)
+
+    def test_report_counts_tasks_and_disclaims_revenue(self):
+        self.store.create_task("Review the network automation roadmap")
+        self.send("/report")
+        message = self.bot.send_message.call_args.args[1]
+        self.assertIn("Görev özeti", message)
+        self.assertIn("planned: 1", message)
+        self.assertIn("gelir veya satış doğrulaması değildir", message)
+
+    def test_new_help_lists_owner_commands(self):
+        self.send("/help")
+        message = self.bot.send_message.call_args.args[1]
+        for command in ("/status", "/agents", "/tasks", "/report", "/approvals"):
+            self.assertIn(command, message)
