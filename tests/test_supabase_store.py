@@ -85,5 +85,24 @@ class SupabaseTaskStoreTests(unittest.TestCase):
         self.assertEqual(mocked_urlopen.call_count, 6)
 
 
+    @patch("company.store.urlopen")
+    def test_create_task_approval_flag_defaults_true_and_can_be_opted_out(self, mocked_urlopen):
+        row = {
+            "task_id": "t", "description": "d", "status": "planned", "owner": "ceo",
+            "execution_mode": "dry_run", "approval_required": False,
+            "created_at": "2026-11-11T00:00:00+00:00", "updated_at": "2026-11-11T00:00:00+00:00",
+        }
+        for kwargs, expected in (({}, True), ({"approval_required": False}, False)):
+            with self.subTest(kwargs=kwargs):
+                mocked_urlopen.reset_mock()
+                mocked_urlopen.side_effect = [
+                    FakeResponse([]), FakeResponse([]), FakeResponse([row]),
+                    FakeResponse([]), FakeResponse([]), FakeResponse([]),
+                ]
+                self.store.create_task("d", task_id="t", **kwargs)
+                body = json.loads(mocked_urlopen.call_args_list[0].args[0].data)
+                self.assertIs(body["approval_required"], expected)
+
+
 if __name__ == "__main__":
     unittest.main()
