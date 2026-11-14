@@ -15,3 +15,5 @@ For every task:
 - Return changed files, test results, risks, and required approval.
 
 Do not publish, deploy, spend money, delete data, or modify real network devices without explicit approval for that exact action.
+
+Multi-assistant rules: more than one AI assistant works in this repository and `main` auto-deploys. Read `AGENTS.md` (branch + PR, tests first, merge one at a time) before changing anything.
