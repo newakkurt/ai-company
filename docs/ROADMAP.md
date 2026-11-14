@@ -18,7 +18,7 @@ Status snapshot: 2026-11-14, after Groq retry fix, scheduler queue repair, and a
 - Worker mode: GitHub Actions scheduled `python -m company.worker --once`; Render embedded worker is configured off.
 - Provider: GitHub Actions selected Groq directly (`openai/gpt-oss-20b`). The dedicated task `smoke-groq-provider-20261113-1900` completed with four persisted outputs, proving a real Groq-backed call. The 2026-11-14 worker also selected Groq. A Groq phantom-tool-call HTTP 400 fix is deployed; the affected Instagram draft is eligible for a bounded retry after its 30-minute cooldown. Worker cron `*/5` and manual `workflow_dispatch` are configured; scheduled worker runs have been observed. Render's embedded worker remains off.
 - Supabase CRM: 16 companies were checked in bounded batches: 10 `reachable_match`, 2 `reachable_no_match`, 2 `too_large`, 2 `unreachable`. A reachable match is source evidence, not human identity/legal approval; all remain in `new` stage.
-- Queue at last database inspection (2026-11-14): 10 completed tasks, 25 failed tasks, 6 planned tasks, 15 dead-letter records, and 102 agent output rows. Twenty-four failed tasks still require human approval; one failed Instagram draft is unapproved analysis-only work and is waiting for its bounded 30-minute retry window. No bulk retry has been performed. Historical events and outputs remain retained.
+- Queue at latest direct Supabase inspection (2026-11-14): 16 completed tasks, 25 failed tasks, 0 currently planned tasks, 15 dead-letter records, and 136 agent output rows. Of the 25 failed tasks, 23 remain approval-gated and 2 are unapproved dry-run tasks eligible only for the scheduler's bounded retry policy (subject to cooldown and retry count). No manual or bulk retry was performed. Historical events and outputs remain retained.
 - Commerce: 1 product release remains `review_required`; its persisted ZIP SHA-256 matches the stored bytes, but runtime QA is pending. Payment events, ledger entries, memberships, entitlements and bank settlements are all 0. `/readyz` confirms BMC webhook/product mappings, SMTP and Telegram owner notifications are not configured; mail remains draft-only. No paid sale or buyer delivery has been proven.
 - Security advisor: zero lints. Performance advisor: the 10 missing foreign-key indexes and 12 RLS initplan policies are fixed; only 17 informational unused-index notices remain. New FK indexes are intentionally retained for referential integrity and expected future lookups.
 
@@ -41,10 +41,10 @@ Status snapshot: 2026-11-14, after Groq retry fix, scheduler queue repair, and a
 - [ ] Permission-based one-to-one outreach workflow with bounce/opt-out handling and provider reputation monitoring.
 - [ ] Sales dashboard: qualified leads, proposals, payment events, refunds, entitlements and bank settlements.
 - [ ] Product version upgrade / license lifecycle and buyer self-service.
-- [ ] Durable backup and restore rehearsal for Supabase and product artifacts.
+- [ ] Durable backup and restore rehearsal for Supabase and product artifacts. No backup/restore rehearsal is currently evidenced.
 - [ ] Production monitoring, dead-letter review UI and alert thresholds.
 - [x] Add indexes for 10 uncovered foreign keys and convert 12 RLS gate policies to initplan-safe scalar subqueries; advisor confirms no FK-index or RLS-initplan warnings.
 - [ ] True isolated runtime QA and supply-chain/dependency scanning for generated ZIPs.
-- [ ] Invoice, VAT, accounting and payout-to-bank reconciliation.
+- [ ] Invoice, VAT, accounting and payout-to-bank reconciliation. These require owner/accountant review and real payout/bank evidence.
 
 A green unit-test run or HTTP health check is not proof of a live sale. Do not mark the company fully operational until the production gates above are completed with real, owner-approved tests.
