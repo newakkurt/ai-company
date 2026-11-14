@@ -45,3 +45,24 @@ class ContextToolRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RiskScopeTests(unittest.TestCase):
+    def test_gate_scans_task_description_not_specialist_output(self):
+        from company.harness.runtime import _risk_scope
+        prompt = (
+            "Task ID: t-1\nTask description: Write a LinkedIn post\n"
+            "Execution mode: dry_run. Analysis only.\n\nSpecialist analysis:\n[x]\niade ve hukuk"
+        )
+        scope = _risk_scope(prompt)
+        self.assertEqual(scope, "Write a LinkedIn post")
+
+    def test_description_that_asks_for_a_risky_action_is_still_scanned(self):
+        from company.harness.escalation import classify_risk
+        from company.harness.runtime import _risk_scope
+        prompt = "Task ID: t-2\nTask description: Issue a refund to the customer\nExecution mode: dry_run."
+        self.assertEqual(classify_risk(_risk_scope(prompt)), ["financial"])
+
+    def test_prompt_without_description_block_is_scanned_in_full(self):
+        from company.harness.runtime import _risk_scope
+        self.assertEqual(_risk_scope("Tool result: chargeback"), "Tool result: chargeback")

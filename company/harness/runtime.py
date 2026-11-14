@@ -75,6 +75,18 @@ def generate_with_context(provider, agent, system_prompt: str, user_prompt: str)
     return _generate(provider, agent, system_prompt, followup)
 
 
+def _risk_scope(prompt: str) -> str:
+    """Text the high-risk gate should inspect: the task description only.
+
+    The CEO prompt also carries specialist output, which is model-generated and in dry_run mode
+    cannot trigger an action (tools have their own approval gate). Scanning it caused false
+    escalations on words like "iade" in a report. Prompts without a task-description block
+    (e.g. tool-result follow-ups) keep being scanned in full.
+    """
+    match = re.search(r"Task description:\s*(.*?)\n(?:Execution mode:|\Z)", prompt, re.S)
+    return match.group(1) if match else prompt
+
+
 def _task_id(prompt: str) -> str:
     match = re.search(r"Task ID:\s*([A-Za-z0-9._-]+)", prompt)
     return match.group(1) if match else "agent-runtime"
@@ -93,7 +105,7 @@ def _generate(provider, agent, system_prompt: str, prompt: str) -> str:
         return provider.generate(system_prompt, prompt)
 
     outcome = run_with_retries(
-        call_once, task_id=_task_id(prompt), description=prompt,
+        call_once, task_id=_task_id(prompt), description=_risk_scope(prompt),
         queue=HumanReviewQueue(),
         verify=lambda output: verify_output(output, min_chars=1, forbid_secrets=False),
         raise_last_exception=True,

@@ -56,6 +56,13 @@ class EscalationTests(unittest.TestCase):
         func.assert_not_called()
         self.assertEqual(outcome.status, "escalated")
         self.assertEqual(set(classify_risk("iade ve dava")), {"financial", "legal"})
+        # Read-only metric names do not escalate ...
+        self.assertEqual(classify_risk("Report funnel stages, churn/refund and refund rate"), [])
+        self.assertEqual(classify_risk("Aylık iade oranı raporu"), [])
+        # ... but actions on money still do.
+        self.assertEqual(classify_risk("Process a refund for order 42"), ["financial"])
+        self.assertEqual(classify_risk("Report churn/refund, then issue a refund"), ["financial"])
+        self.assertEqual(classify_risk("müşteriye iade yap"), ["financial"])
 
     def test_queue_is_idempotent_redacted_and_decidable(self):
         first = self.queue.enqueue("t5", "why", {"mail": "ali@example.com"})
