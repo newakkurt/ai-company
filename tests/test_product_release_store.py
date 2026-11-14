@@ -1,16 +1,26 @@
+import base64
 import hashlib
+import io
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from company.store import TaskStore
+
+
+def make_zip():
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("README.md", "Safe offline product package.\\n")
+    return buffer.getvalue()
 
 
 class ProductReleaseStoreTests(unittest.TestCase):
     def test_release_artifact_is_durable_and_checksum_verified(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = TaskStore(Path(tmp) / "releases.db")
-            artifact = b"sample-zip-content"
+            artifact = make_zip()
             digest = hashlib.sha256(artifact).hexdigest()
             release = {
                 "product_id": "prd-012345abcdef",
@@ -25,12 +35,29 @@ class ProductReleaseStoreTests(unittest.TestCase):
             saved = store.save_product_release(release, artifact)
             self.assertEqual(saved["sha256"], digest)
             self.assertEqual(saved["artifact_bytes"], len(artifact))
+            self.assertEqual(base64.b64decode(saved["artifact_base64"]), artifact)
             self.assertEqual(saved["manifest_json"]["release_status"], "review_required")
             self.assertNotIn("download_path", saved["manifest_json"])
             listed = store.list_product_releases()
             self.assertEqual(listed[0]["product_id"], release["product_id"])
             with self.assertRaises(ValueError):
                 store.save_product_release(release, b"tampered")
+
+    def test_corrupt_zip_is_rejected_even_when_checksum_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = TaskStore(Path(tmp) / "corrupt-release.db")
+            artifact = b"not-a-valid-zip"
+            release = {
+                "product_id": "prd-012345abcdef",
+                "name": "Network Ops Starter",
+                "version": "0.1.0",
+                "summary": "Offline-first network audit starter",
+                "release_status": "review_required",
+                "checksum": hashlib.sha256(artifact).hexdigest(),
+            }
+            with self.assertRaisesRegex(ValueError, "valid ZIP"):
+                store.save_product_release(release, artifact)
+            self.assertIsNone(store.get_product_release(release["product_id"]))
 
     def test_empty_and_oversized_artifacts_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -51,7 +78,7 @@ class ProductReleaseStoreTests(unittest.TestCase):
         import hashlib
         with tempfile.TemporaryDirectory() as tmp:
             store = TaskStore(Path(tmp) / "fulfillment.db")
-            artifact = b"zip-product-data"
+            artifact = make_zip()
             digest = hashlib.sha256(artifact).hexdigest()
             release = {
                 "product_id": "prd-abcdef123456", "name": "NetCmd PRO",
