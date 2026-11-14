@@ -98,6 +98,20 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(after["execution_mode"], "dry_run")
         self.assertEqual(after["events"][-1]["event_type"], "scheduled_analysis_enabled")
 
+    def test_legacy_playbook_with_existing_output_stays_approval_gated(self):
+        now = datetime(2026, 11, 14, 8, 0, tzinfo=TR)
+        task_id, playbook = next(
+            (task_id, playbook)
+            for task_id, playbook in scheduler.due_playbooks(now)
+            if playbook.slug == "marketing-conversion-analysis"
+        )
+        self.store.create_task(playbook.description, task_id=task_id)
+        self.store.record_agent_output(task_id, "data_analytics", "Previous analysis")
+        enabled = scheduler.seed_due_tasks(self.store, now=now)
+        task = self.store.get_task(task_id)
+        self.assertNotIn(task_id, enabled)
+        self.assertTrue(task["approval_required"])
+
     def test_legacy_recovery_task_keeps_human_approval(self):
         now = datetime(2026, 11, 14, 8, 0, tzinfo=TR)
         task_id, playbook = next(
