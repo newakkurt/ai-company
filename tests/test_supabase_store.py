@@ -104,5 +104,33 @@ class SupabaseTaskStoreTests(unittest.TestCase):
                 self.assertIs(body["approval_required"], expected)
 
 
+    @patch.object(SupabaseTaskStore, "_request")
+    def test_failed_task_retry_requires_approval_opt_out_on_read_and_claim(self, mocked_request):
+        mocked_request.side_effect = [
+            [{"task_id": "task-safe"}],  # eligible failed task
+            [],                          # retry history
+            [{"task_id": "task-safe"}],  # conditional update
+            [],                          # assignments
+            [],                          # audit event
+        ]
+        self.assertTrue(self.store.requeue_failed_task("task-safe", min_age_minutes=0))
+        first_filter = mocked_request.call_args_list[0].kwargs["params"]
+        claim_filter = mocked_request.call_args_list[2].args[2]
+        self.assertEqual(first_filter["approval_required"], "eq.false")
+        self.assertEqual(claim_filter["approval_required"], "eq.false")
+
+    @patch.object(SupabaseTaskStore, "_request")
+    def test_stale_task_recovery_rechecks_approval_flag_on_update(self, mocked_request):
+        mocked_request.side_effect = [
+            [{"task_id": "task-safe"}],  # stale candidates
+            [{"task_id": "task-safe"}],  # conditional update
+            [],                          # audit event
+        ]
+        self.assertEqual(self.store.requeue_stale_tasks(stale_minutes=0), 1)
+        update_filter = mocked_request.call_args_list[1].args[2]
+        self.assertEqual(update_filter["approval_required"], "eq.false")
+
+
+
 if __name__ == "__main__":
     unittest.main()
