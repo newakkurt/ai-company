@@ -257,6 +257,7 @@ class SupabaseTaskStore:
             changed = self._request("tasks", "PATCH", {
                 "task_id": f"eq.{task_id}", "status": "eq.running",
                 "updated_at": f"lt.{cutoff}", "execution_mode": "eq.dry_run",
+                "approval_required": "eq.false",
             }, {"status": "planned", "updated_at": utc_now()}, "return=representation")
             if changed:
                 self._event(task_id, "agent_task_requeued", "worker", {
@@ -295,7 +296,8 @@ class SupabaseTaskStore:
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=min_age_minutes)).isoformat()
         rows = self._request("tasks", params={
             "select": "task_id", "task_id": f"eq.{task_id}", "status": "eq.failed",
-            "execution_mode": "eq.dry_run", "updated_at": f"lt.{cutoff}", "limit": "1",
+            "execution_mode": "eq.dry_run", "approval_required": "eq.false",
+            "updated_at": f"lt.{cutoff}", "limit": "1",
         })
         if not rows:
             return False
@@ -307,6 +309,7 @@ class SupabaseTaskStore:
             return False
         changed = self._request("tasks", "PATCH", {
             "task_id": f"eq.{task_id}", "status": "eq.failed",
+            "approval_required": "eq.false",
         }, {"status": "planned", "updated_at": utc_now()}, "return=representation")
         if not changed:
             return False
