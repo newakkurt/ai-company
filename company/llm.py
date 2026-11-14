@@ -196,6 +196,14 @@ class GroqProvider:
 
     supports_search = False
 
+    # gpt-oss models sometimes emit a phantom tool call when a prompt says "research the web";
+    # Groq then rejects the whole request with HTTP 400. State plainly that no tools exist.
+    NO_TOOLS_NOTE = (
+        "No tools, browsing or function calls are available in this conversation. "
+        "Never emit a tool call; answer in plain text only and state clearly what you "
+        "could not verify."
+    )
+
     def generate(self, system_prompt: str, user_prompt: str, use_search: bool = False,
                  max_tokens: int | None = None) -> str:
         # use_search is accepted for interface parity; Groq has no grounding tool.
@@ -204,7 +212,7 @@ class GroqProvider:
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": system_prompt + "\n\n" + self.NO_TOOLS_NOTE},
                 {"role": "user", "content": user_prompt},
             ],
             "max_tokens": clamp_max_tokens(max_tokens, GROQ_MAX_OUTPUT_TOKENS),
@@ -266,6 +274,14 @@ class GroqProvider:
                         flush=True,
                     )
                     time.sleep(delay)
+                    continue
+                if status == 400 and attempt < 2 and "tool choice is none" in detail.lower():
+                    # Sampling quirk, not a bad request: bounded retry (max 2 extra attempts).
+                    print(
+                        "agent_worker: Groq phantom tool call rejected; retrying "
+                        f"(attempt={attempt + 1}/3)",
+                        flush=True,
+                    )
                     continue
                 if not detail:
                     content_type = (exc.headers.get("Content-Type", "") if exc.headers else "")[:80]
