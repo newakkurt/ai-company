@@ -1260,6 +1260,7 @@ class TaskStore:
     def save_product_release(self, release: dict, artifact: bytes):
         if not isinstance(artifact, bytes) or not artifact or len(artifact) > MAX_PRODUCT_ARTIFACT_BYTES:
             raise ValueError("Product artifact is empty or exceeds the 1.5 MB storage limit")
+        _validate_product_artifact(artifact)
         digest = hashlib.sha256(artifact).hexdigest()
         if release.get("checksum") and release["checksum"] != digest:
             raise ValueError("Product artifact checksum does not match release metadata")
