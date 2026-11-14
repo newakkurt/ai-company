@@ -87,7 +87,67 @@ class TelegramIntake:
         command, _, argument = text.partition(" ")
         command = command.split("@", 1)[0].lower()
         if command in ("/start", "/help"):
-            self.send_message(chat_id, "AI Company görev botu hazır.\nYeni görev: /task Görev açıklaması\nBekleyen onaylar: /approvals\nBu bot görev kaydeder ve onay kararlarını kaydeder; görevleri çalıştırmaz.")
+            self.send_message(
+                chat_id,
+                "AI Company yönetim botu hazır.\\n"
+                "/status - yapılandırma özeti\\n"
+                "/agents - uzman ajan listesi\\n"
+                "/tasks - son görevler\\n"
+                "/report - görev özeti\\n"
+                "/task Açıklama - yeni dry-run görev kaydı\\n"
+                "/approvals - bekleyen onaylar\\n"
+                "Not: Bu bot doğrudan cihaz veya dış sistem işlemi çalıştırmaz."
+            )
+            return True
+        if command == "/status":
+            required = ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_DB_GATE_KEY")
+            db_ready = all(os.getenv(key, "").strip() for key in required)
+            ai_ready = bool(os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GROQ_API_KEY", "").strip())
+            worker_enabled = os.getenv("AI_COMPANY_EMBEDDED_WORKER", "").strip().lower() == "true"
+            telegram_enabled = os.getenv("AI_COMPANY_EMBEDDED_TELEGRAM", "").strip().lower() == "true"
+            lines = [
+                "AI Company yapılandırma durumu",
+                f"AI anahtarı: {'var' if ai_ready else 'eksik'}",
+                f"Supabase ayarları: {'tam' if db_ready else 'eksik (SQLite/fallback olabilir)'}",
+                f"Render gömülü worker: {'açık' if worker_enabled else 'kapalı'}",
+                f"Telegram polling: {'açık' if telegram_enabled else 'kapalı'}",
+                "Çalışma modu: analiz / dry-run",
+                "Canlı servis sağlığı bu komutla doğrulanmaz; yalnızca ayarlar gösterilir."
+            ]
+            self.send_message(chat_id, "\\n".join(lines))
+            return True
+        if command == "/agents":
+            from .agents import agent_summary
+            agents = agent_summary()
+            lines = [f"Uzman ajanlar ({len(agents)})"]
+            lines.extend(f"- {item['name']} [{item['id']}]" for item in agents)
+            self.send_message(chat_id, "\\n".join(lines)[:3800])
+            return True
+        if command == "/tasks":
+            tasks = self.store.list_tasks(limit=5)
+            if not tasks:
+                self.send_message(chat_id, "Henüz görev kaydı yok.")
+                return True
+            lines = ["Son görevler"]
+            for item in tasks:
+                description = " ".join(str(item.get("description") or "").split())
+                if len(description) > 110:
+                    description = description[:107] + "..."
+                lines.append(f"- {item.get('status', 'unknown')}: {description or item.get('task_id', 'Görev')}")
+            self.send_message(chat_id, "\\n".join(lines)[:3800])
+            return True
+        if command == "/report":
+            tasks = self.store.list_tasks(limit=100)
+            counts = {}
+            for item in tasks:
+                status = str(item.get("status") or "unknown")
+                counts[status] = counts.get(status, 0) + 1
+            lines = [f"Görev özeti (son {len(tasks)} kayıt)"]
+            lines.extend(f"- {status}: {count}" for status, count in sorted(counts.items()))
+            if not counts:
+                lines.append("- Henüz görev yok")
+            lines.append("Not: Bu rapor yalnızca kayıtlı görevleri sayar; gelir veya satış doğrulaması değildir.")
+            self.send_message(chat_id, "\\n".join(lines)[:3800])
             return True
         if command == "/approvals":
             from .notifier import approval_keyboard, format_approval_message
