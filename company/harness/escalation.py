@@ -28,9 +28,19 @@ HIGH_RISK = {
 }
 
 
+# Read-only reporting phrases (a metric NAME, not an instruction to act) are removed before
+# matching. Deliberately tiny and explicit: "process a refund", "iade yap", "payout" etc. still
+# escalate. Add entries here only for phrases that describe a number being reported.
+_READ_ONLY_REPORTING = re.compile(
+    r"(?i)\b(?:churn\s*/\s*refunds?|refunds?\s*/\s*churn|refund\s+(?:rates?|ratios?|counts?)|"
+    r"iade\s+oran[ıi]\w*)\b"
+)
+
+
 def classify_risk(text: str) -> list[str]:
     """Return categories that must go to a human (empty list = automatable)."""
-    return [name for name, pattern in HIGH_RISK.items() if pattern.search(text or "")]
+    text = _READ_ONLY_REPORTING.sub(" ", text or "")
+    return [name for name, pattern in HIGH_RISK.items() if pattern.search(text)]
 
 
 def db_path() -> Path:
