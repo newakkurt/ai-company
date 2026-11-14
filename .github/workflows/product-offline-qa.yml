@@ -101,14 +101,14 @@ jobs:
           allowed = {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml",
                      ".html", ".css", ".js", ".ts", ".sql", ".cfg", ""}
           secret_patterns = [
-              re.compile(r"(?i)(api[_-]?key|password|secret|token)\\s*[:=]\\s*['\\\"][^'\\\"]{8,}['\\\"]"),
+              re.compile(r'''(?i)(api[_-]?key|password|secret|token)\s*[:=]\s*['"][^'"]{8,}['"]'''),
               re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
           ]
           risky_patterns = [
-              re.compile(r"(?i)\\b(eval|exec)\\s*\\("),
-              re.compile(r"(?i)\\b(subprocess|os\\.system|os\\.popen|pty\\.)"),
-              re.compile(r"(?i)\\b(requests\\.(?:get|post)|urlopen|httpx\\.|aiohttp\\.)"),
-              re.compile(r"(?i)\\b(socket|paramiko|netmiko)\\b"),
+              re.compile(r"(?i)\b(eval|exec)\s*\("),
+              re.compile(r"(?i)\b(subprocess|os\.system|os\.popen|pty\.)"),
+              re.compile(r"(?i)\b(requests\.(?:get|post)|urlopen|httpx\.|aiohttp\.)"),
+              re.compile(r"(?i)\b(socket|paramiko|netmiko)\b"),
           ]
 
           archive_path = Path("qa-input/release.zip")
