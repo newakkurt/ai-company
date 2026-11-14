@@ -8,16 +8,17 @@ on:
         required: true
         default: "prd-1cdfbb2727ef"
         type: string
-  push:
+  workflow_run:
+    workflows: ["Rebuild ConfigGuard Lite Release Artifact"]
+    types: [completed]
     branches: [main]
-    paths:
-      - ".github/workflows/product-offline-qa.yml"
 
 permissions:
   contents: read
 
 jobs:
   offline-release-qa:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
