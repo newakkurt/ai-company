@@ -97,6 +97,23 @@ class GeminiProviderTests(unittest.TestCase):
             self.assertEqual(provider.generate("system", "A" * 30000), "Groq OK")
         self.assertLess(len(prompts[1]), len(prompts[0]))
         self.assertIn("Middle context excerpt omitted", prompts[1])
+        self.assertIn("\n\n[Middle context excerpt omitted to fit provider TPM budget]\n\n", prompts[1])
+        self.assertNotIn("\\n\\n[Middle context excerpt omitted", prompts[1])
+
+    def test_groq_tpm_429_parses_provider_retry_hint(self):
+        rate_limit = HTTPError(
+            GroqProvider.ENDPOINT,
+            429,
+            "Too Many Requests",
+            {},
+            io.BytesIO(b'{"error":{"message":"Rate limit reached; try again in 3.5s"}}'),
+        )
+        success = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
+        with patch("company.llm.urlopen", side_effect=[rate_limit, success]):
+            with patch("company.llm.time.sleep") as sleep:
+                provider = GroqProvider(api_key="groq-test-key")
+                self.assertEqual(provider.generate("system", "user"), "Groq OK")
+        sleep.assert_called_once_with(4)
 
     def test_groq_system_prompt_states_that_no_tools_exist(self):
         response = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
@@ -178,7 +195,6 @@ class GeminiProviderTests(unittest.TestCase):
         class Fallback:
             def generate(self, *_args):
                 raise AssertionError("Fallback must not run for invalid credentials")
-
         provider = FallbackProvider(Primary(), Fallback())
         with self.assertRaises(GeminiAPIError):
             provider.generate("system", "user")
