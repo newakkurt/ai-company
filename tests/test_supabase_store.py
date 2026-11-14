@@ -131,6 +131,33 @@ class SupabaseTaskStoreTests(unittest.TestCase):
         self.assertEqual(update_filter["approval_required"], "eq.false")
 
 
+    @patch.object(SupabaseTaskStore, "_request")
+    def test_legacy_scheduled_task_is_enabled_only_when_untouched(self, mocked_request):
+        mocked_request.side_effect = [
+            [],  # no prior claim/failure/retry/dead-letter event
+            [],  # no persisted agent output
+            [{"task_id": "legacy-task"}],  # conditional approval update
+            [],  # audit event
+        ]
+        self.assertTrue(
+            self.store.enable_scheduled_analysis_task("legacy-task", "Exact fixed playbook")
+        )
+        update_filter = mocked_request.call_args_list[2].args[2]
+        self.assertEqual(update_filter["description"], "eq.Exact fixed playbook")
+        self.assertEqual(update_filter["approval_required"], "eq.true")
+
+    @patch.object(SupabaseTaskStore, "_request")
+    def test_legacy_scheduled_task_with_prior_output_is_not_enabled(self, mocked_request):
+        mocked_request.side_effect = [
+            [],  # no prior event
+            [{"output_id": "existing-output"}],
+        ]
+        self.assertFalse(
+            self.store.enable_scheduled_analysis_task("legacy-task", "Exact fixed playbook")
+        )
+        self.assertEqual(mocked_request.call_count, 2)
+
+
 
 if __name__ == "__main__":
     unittest.main()
