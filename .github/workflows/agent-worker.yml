@@ -76,6 +76,7 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           AI_COMPANY_GEMINI_MODEL: gemini-3.5-flash-lite
           GROQ_MODEL: openai/gpt-oss-20b
+          AI_COMPANY_PROVIDER: groq
         run: python -m company.worker --once
 
       - name: Report idle or waiting state
