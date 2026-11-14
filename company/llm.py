@@ -257,6 +257,27 @@ class GroqProvider:
                     marker in detail.lower()
                     for marker in ("tokens per minute", "requests per minute", "rate limit reached")
                 )
+                if status == 413 and is_tpm_limit and attempt < 2:
+                    # A request larger than the TPM budget will not succeed unchanged.
+                    # Reduce the user context progressively while preserving its beginning
+                    # (task instructions) and ending (latest specialist context).
+                    current = payload["messages"][1]["content"]
+                    target = max(4000, int(len(current) * 0.65))
+                    if len(current) > target + 500:
+                        head = int(target * 0.65)
+                        tail = target - head
+                        payload["messages"][1]["content"] = (
+                            current[:head].rstrip()
+                            + "\\n\\n[Middle context excerpt omitted to fit provider TPM budget]\\n\\n"
+                            + current[-tail:].lstrip()
+                        )
+                        body = json.dumps(payload).encode("utf-8")
+                        print(
+                            "agent_worker: Groq TPM 413; reducing user context and retrying "
+                            f"(attempt={attempt + 1}/3, chars={len(current)}->{len(payload['messages'][1]['content'])})",
+                            flush=True,
+                        )
+                        continue
                 if status in {413, 429} and attempt < 2 and (retry_after or is_tpm_limit):
                     delay = 60
                     if retry_after:
@@ -265,7 +286,7 @@ class GroqProvider:
                         except (TypeError, ValueError):
                             delay = 60
                     else:
-                        match = re.search(r"try again in\s+(\d+(?:\.\d+)?)\s*s", detail, re.I)
+                        match = re.search(r"try again in\\s+(\\d+(?:\\.\\d+)?)\\s*s", detail, re.I)
                         if match:
                             delay = max(1, min(int(float(match.group(1)) + 1), 90))
                     print(
