@@ -61,7 +61,8 @@ Status snapshot: 2026-11-14, after Groq retry fix, scheduler queue repair, Pytho
 - [ ] Durable backup and restore rehearsal for Supabase and product artifacts. No backup/restore rehearsal is currently evidenced.
 - [ ] Production monitoring, dead-letter review UI and alert thresholds.
 - [x] Add indexes for 10 uncovered foreign keys and convert 12 RLS gate policies to initplan-safe scalar subqueries; advisor confirms no FK-index or RLS-initplan warnings.
-- [x] ConfigGuard Lite 1.0.0 isolated runtime QA and static archive/source scan completed.\n- [x] Validate ZIP integrity, CRC, paths, symlinks, encryption, entry/size limits before either local or Supabase product-release persistence; regression tests added. Apply the same offline QA gate to future generated releases.
+- [x] ConfigGuard Lite 1.0.0 isolated runtime QA and static archive/source scan completed.
+- [x] Validate ZIP integrity, CRC, paths, symlinks, encryption, entry/size limits before either local or Supabase product-release persistence; regression tests added. Apply the same offline QA gate to future generated releases.
 - [ ] Invoice, VAT, accounting and payout-to-bank reconciliation. These require owner/accountant review and real payout/bank evidence.
 
 A green unit-test run or HTTP health check is not proof of a live sale. Do not mark the company fully operational until the production gates above are completed with real, owner-approved tests.
