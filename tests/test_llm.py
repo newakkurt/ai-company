@@ -77,6 +77,22 @@ class GeminiProviderTests(unittest.TestCase):
                 self.assertEqual(provider.generate("system", "user"), "Groq OK")
         sleep.assert_called_once_with(60)
 
+    def test_groq_tpm_413_waits_and_retries_once(self):
+        rate_limit = HTTPError(
+            GroqProvider.ENDPOINT,
+            413,
+            "Request too large",
+            {},
+            io.BytesIO(b'{"error":{"message":"Requested 10000 tokens, limit 8000 tokens per minute"}}'),
+        )
+        success = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
+        with patch("company.llm.urlopen", side_effect=[rate_limit, success]) as request:
+            with patch("company.llm.time.sleep") as sleep:
+                provider = GroqProvider(api_key="groq-test-key")
+                self.assertEqual(provider.generate("system", "user"), "Groq OK")
+        self.assertEqual(request.call_count, 2)
+        sleep.assert_called_once_with(60)
+
     def test_groq_system_prompt_states_that_no_tools_exist(self):
         response = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
         with patch("company.llm.urlopen", return_value=response) as request:
