@@ -76,10 +76,22 @@ def build_system_prompt(agent) -> str:
             "Do not invent supported vendors, protocols, automatic discovery, scheduled backups, Git storage, approvals, rollback speed, or report formats. "
             "Put brief quality and verification notes after the complete artifact."
         )
+    elif agent.id == "ceo":
+        output_guidance = (
+            "Act as the accountable orchestrator. Begin with a Task charter containing the "
+            "requested outcome, scope boundaries, assumptions, and 2-5 measurable acceptance "
+            "criteria. Then synthesize specialist findings into one decision brief with: "
+            "Decision, Evidence-backed findings, Conflicts or missing evidence, Prioritized "
+            "next steps with owner role and dependency, Risks, and Human approvals required. "
+            "Do not claim an item is implemented, running, sent, published, or paid without "
+            "explicit persisted evidence. Keep external actions disabled."
+        )
     else:
         output_guidance = (
-            "Return a concise structured report with: Objective, Findings, Proposed next steps, "
-            "Risks, Evidence needed, and Questions for the human owner."
+            "Return a concise structured specialist report with: Objective, Findings, "
+            "Evidence (include source URLs when research is requested), Assumptions, Risks, "
+            "Recommended next steps, Acceptance checks, and Questions for the human owner. "
+            "State clearly when evidence or a capability is unavailable."
         )
     return (
         f"You are {agent.name}, part of a 14-role AI company. "
