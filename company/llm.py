@@ -257,7 +257,7 @@ class GroqProvider:
                     marker in detail.lower()
                     for marker in ("tokens per minute", "requests per minute", "rate limit reached")
                 )
-                if status == 429 and attempt < 2 and (retry_after or is_tpm_limit):
+                if status in {413, 429} and attempt < 2 and (retry_after or is_tpm_limit):
                     delay = 60
                     if retry_after:
                         try:
@@ -269,7 +269,7 @@ class GroqProvider:
                         if match:
                             delay = max(1, min(int(float(match.group(1)) + 1), 90))
                     print(
-                        f"agent_worker: Groq rate limit reached; retrying after {delay}s "
+                        f"agent_worker: Groq TPM/rate limit reached; retrying after {delay}s "
                         f"(attempt={attempt + 1}/3)",
                         flush=True,
                     )
