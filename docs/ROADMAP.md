@@ -71,3 +71,12 @@ A green unit-test run or HTTP health check is not proof of a live sale. Do not m
 - Added a regression test in `tests/test_llm.py` verifying the HTTP 413 retry uses a shorter prompt; removed the obsolete wait-only test.
 - Commits: `1c7cee2` (initial retry handling), `529d0a0` and `629599b` (adaptive excerpt and literal correction), `37cc88d` and `d6639eb` (regression test).
 - Verification limitation: source and test changes were read back from GitHub; the Render web service deployment and `/readyz` health response were confirmed live, but the full unit-test suite has not yet been run in this session. Existing failed tasks were not manually retried, and approval-gated tasks remain untouched.
+
+
+## 2026-11-14 — Explicit worker provider routing
+
+- [x] Add `AI_COMPANY_PROVIDER=auto|gemini|groq` so the selected provider is deterministic when both credentials exist.
+- [x] Pin the scheduled GitHub Actions analysis worker to `AI_COMPANY_PROVIDER=groq`; this prevents a configured Gemini key from silently becoming primary while its quota is exhausted.
+- [x] Add regression tests for explicit Groq selection and for refusing to silently fall back to Gemini when the forced Groq key is missing.
+- [x] Document the setting in `.env.example`.
+- [ ] Confirm the GitHub Actions test run and a successful post-change Groq task before marking this change runtime-verified.
