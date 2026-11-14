@@ -1,11 +1,14 @@
 """SQLite development store and secured Supabase PostgREST cloud store."""
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import json
 import base64
 import hashlib
+import io
 import os
 import sqlite3
+import stat
+import zipfile
 import uuid
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
@@ -18,6 +21,44 @@ DB_PATH = ROOT / "data" / "company.db"
 # otherwise a second worker re-claims a task that is still being processed.
 STALE_LEASE_MINUTES = 15
 MAX_PRODUCT_ARTIFACT_BYTES = 1_500_000
+
+
+def _validate_product_artifact(artifact: bytes) -> None:
+    """Reject corrupt or unsafe ZIPs before persisting a product release."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(artifact), "r") as archive:
+            infos = archive.infolist()
+            if not infos or len(infos) > 24:
+                raise ValueError("Product artifact ZIP has an invalid entry count")
+            names = set()
+            total_size = 0
+            for info in infos:
+                name = info.filename
+                path = PurePosixPath(name)
+                if (
+                    not name or name.startswith("/") or "\\" in name
+                    or ":" in name or path.is_absolute() or ".." in path.parts
+                ):
+                    raise ValueError(f"Unsafe product artifact path: {name!r}")
+                if name in names:
+                    raise ValueError(f"Duplicate product artifact path: {name!r}")
+                names.add(name)
+                if info.flag_bits & 0x1:
+                    raise ValueError("Encrypted product artifact entries are not allowed")
+                if ((info.external_attr >> 16) & 0o170000) == stat.S_IFLNK:
+                    raise ValueError(f"Symlink product artifact entry rejected: {name}")
+                if info.file_size > 180_000:
+                    raise ValueError(f"Product artifact entry exceeds size limit: {name}")
+                if info.compress_size and info.file_size / info.compress_size > 60:
+                    raise ValueError(f"Suspicious product artifact compression ratio: {name}")
+                total_size += info.file_size
+                if total_size > MAX_PRODUCT_ARTIFACT_BYTES:
+                    raise ValueError("Expanded product artifact exceeds size limit")
+            bad_member = archive.testzip()
+            if bad_member:
+                raise ValueError(f"Product artifact ZIP CRC check failed: {bad_member}")
+    except (zipfile.BadZipFile, OSError, EOFError) as exc:
+        raise ValueError("Product artifact must be a complete, valid ZIP archive") from exc
 
 
 def utc_now() -> str:
@@ -516,6 +557,7 @@ class SupabaseTaskStore:
     def save_product_release(self, release: dict, artifact: bytes):
         if not isinstance(artifact, bytes) or not artifact or len(artifact) > MAX_PRODUCT_ARTIFACT_BYTES:
             raise ValueError("Product artifact is empty or exceeds the 1.5 MB storage limit")
+        _validate_product_artifact(artifact)
         digest = hashlib.sha256(artifact).hexdigest()
         if release.get("checksum") and release["checksum"] != digest:
             raise ValueError("Product artifact checksum does not match release metadata")
