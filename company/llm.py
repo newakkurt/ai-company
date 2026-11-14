@@ -297,7 +297,8 @@ class GroqProvider:
                     time.sleep(delay)
                     continue
                 if status == 400 and attempt < 2 and "tool choice is none" in detail.lower():
-                    # Sampling quirk, not a bad request: bounded retry (max 2 extra attempts).                    print(
+                    # Sampling quirk, not a bad request: bounded retry (max 2 extra attempts).
+                    print(
                         "agent_worker: Groq phantom tool call rejected; retrying "
                         f"(attempt={attempt + 1}/3)",
                         flush=True,
