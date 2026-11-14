@@ -1,10 +1,12 @@
 import asyncio
 import hashlib
 import hmac
+import io
 import json
 import os
 import tempfile
 import unittest
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -18,6 +20,13 @@ from company.store import TaskStore
 from company.worker import process_one_task
 
 TR = timezone(timedelta(hours=3))
+
+
+def make_test_zip():
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("README.md", "Test product package.\\n")
+    return buffer.getvalue()
 
 
 class FakeResponse:
@@ -598,7 +607,7 @@ class SaleWebhookTests(unittest.TestCase):
         }
 
     def _save_approved_release(self):
-        artifact = b"sample-product-zip"
+        artifact = make_test_zip()
         digest = hashlib.sha256(artifact).hexdigest()
         release = {
             "product_id": "prd-594541abcdef", "name": "NetCmd PRO",
