@@ -12,7 +12,7 @@ from company.store import TaskStore
 def make_zip():
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("README.md", "Safe offline product package.\\n")
+        archive.writestr("README.md", "Safe offline product package.\n")
     return buffer.getvalue()
 
 
