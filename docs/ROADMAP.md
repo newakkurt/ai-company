@@ -52,7 +52,7 @@ A green unit-test run or HTTP health check is not proof of a live sale. Do not m
 ## 2026-11-14 — Groq TPM quota recovery
 
 - Supabase failure events showed Gemini HTTP 429 quota exhaustion across 25 failed tasks, plus Groq HTTP 413 responses for 2 tasks: the Groq on-demand 8,000 tokens-per-minute budget was exceeded (requests recorded at approximately 10,321 and 10,613 tokens).
-- Updated `company/llm.py`: Groq HTTP 413 responses explicitly identified as TPM/rate-limit failures now receive the same bounded retry/backoff path as HTTP 429 (maximum 3 attempts; 60-second default wait, capped at 90 seconds when Retry-After is supplied).
-- Added a regression test in `tests/test_llm.py` for HTTP 413 TPM backoff and successful retry.
-- Commits: `1c7cee2` (implementation), `88cae37` (regression test).
+- Updated `company/llm.py`: Groq HTTP 413 responses explicitly identified as TPM failures now progressively reduce the user-context excerpt before retrying (preserving the prompt beginning and ending); HTTP 429 continues to use bounded Retry-After/backoff. The retry limit remains 3 total attempts.
+- Added a regression test in `tests/test_llm.py` verifying the HTTP 413 retry uses a shorter prompt; removed the obsolete wait-only test.
+- Commits: `1c7cee2` (initial retry handling), `529d0a0` and `629599b` (adaptive excerpt and literal correction), `37cc88d` and `d6639eb` (regression test).
 - Verification limitation: source and test changes were read back from GitHub, but the test suite and hosted worker deployment have not yet been executed/confirmed. Existing failed tasks were not manually retried, and approval-gated tasks remain untouched.
