@@ -80,6 +80,39 @@ class SchedulerTests(unittest.TestCase):
             self.assertFalse(task["approval_required"], task_id)
             self.assertEqual(task["execution_mode"], "dry_run", task_id)
 
+    def test_legacy_exact_playbook_task_is_safely_enabled(self):
+        now = datetime(2026, 11, 14, 8, 0, tzinfo=TR)
+        task_id, playbook = next(
+            (task_id, playbook)
+            for task_id, playbook in scheduler.due_playbooks(now)
+            if playbook.slug == "marketing-conversion-analysis"
+        )
+        self.store.create_task(playbook.description, task_id=task_id)
+        before = self.store.get_task(task_id)
+        self.assertTrue(before["approval_required"])
+
+        enabled = scheduler.seed_due_tasks(self.store, now=now)
+        after = self.store.get_task(task_id)
+        self.assertIn(task_id, enabled)
+        self.assertFalse(after["approval_required"])
+        self.assertEqual(after["execution_mode"], "dry_run")
+        self.assertEqual(after["events"][-1]["event_type"], "scheduled_analysis_enabled")
+
+    def test_legacy_recovery_task_keeps_human_approval(self):
+        now = datetime(2026, 11, 14, 8, 0, tzinfo=TR)
+        task_id, playbook = next(
+            (task_id, playbook)
+            for task_id, playbook in scheduler.due_playbooks(now)
+            if playbook.slug == "marketing-conversion-analysis"
+        )
+        self.store.create_task(
+            playbook.description + " manually edited",
+            task_id="recovery-" + task_id,
+        )
+        scheduler.seed_due_tasks(self.store, now=now)
+        recovery = self.store.get_task("recovery-" + task_id)
+        self.assertTrue(recovery["approval_required"])
+
     def test_manual_tasks_still_require_approval(self):
         task = self.store.create_task("Manual task", task_id="task-manual-1")
         self.assertTrue(task["approval_required"])
