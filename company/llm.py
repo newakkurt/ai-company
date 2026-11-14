@@ -378,9 +378,18 @@ class FallbackProvider:
 
 
 def _get_cloud_provider():
-    """Prefer Gemini; use Groq as a quota-safe fallback when its key is configured."""
+    """Select an explicit cloud provider when configured; otherwise use Gemini with Groq fallback."""
     gemini_key = normalize_api_key(os.getenv("GEMINI_API_KEY", ""))
     groq_key = normalize_api_key(os.getenv("GROQ_API_KEY", ""))
+    selected = os.getenv("AI_COMPANY_PROVIDER", "").strip().lower()
+
+    if selected == "groq":
+        return GroqProvider(api_key=groq_key) if groq_key else None
+    if selected == "gemini":
+        return GeminiProvider(api_key=gemini_key) if gemini_key else None
+    if selected not in {"", "auto"}:
+        raise ValueError("AI_COMPANY_PROVIDER must be one of: auto, gemini, groq")
+
     gemini = GeminiProvider(api_key=gemini_key) if gemini_key else None
     groq = GroqProvider(api_key=groq_key) if groq_key else None
     if gemini and groq:
