@@ -1,0 +1,163 @@
+name: Rebuild ConfigGuard Lite Release Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_id:
+        description: "Exact existing ConfigGuard Lite release ID"
+        required: true
+        default: "prd-1cdfbb2727ef"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild-release-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rebuild package, verify ZIP, and replace stored artifact
+        env:
+          PRODUCT_ID: ${{ inputs.product_id }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_DB_GATE_KEY: ${{ secrets.SUPABASE_DB_GATE_KEY }}
+        run: |
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import re
+          import zipfile
+          from pathlib import Path
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          product_id = os.environ["PRODUCT_ID"].strip()
+          if product_id != "prd-1cdfbb2727ef":
+              raise SystemExit("This rebuild workflow is restricted to the approved ConfigGuard Lite product ID.")
+
+          origin = os.environ["SUPABASE_URL"].strip().rstrip("/")
+          key = os.environ["SUPABASE_ANON_KEY"]
+          gate = os.environ["SUPABASE_DB_GATE_KEY"]
+          if not origin.startswith("https://"):
+              raise SystemExit("SUPABASE_URL must use HTTPS.")
+
+          def request_json(method, url, payload=None):
+              headers = {
+                  "apikey": key,
+                  "Authorization": "Bearer " + key,
+                  "X-AI-Company-Key": gate,
+                  "Accept": "application/json",
+              }
+              data = None
+              if payload is not None:
+                  headers["Content-Type"] = "application/json"
+                  headers["Prefer"] = "return=representation"
+                  data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+              req = Request(url, data=data, headers=headers, method=method)
+              with urlopen(req, timeout=30) as response:
+                  raw = response.read()
+              return json.loads(raw.decode("utf-8")) if raw else []
+
+          query = urlencode({
+              "select": "product_id,name,version,release_status,manifest_json",
+              "product_id": "eq." + product_id,
+          })
+          rows = request_json("GET", f"{origin}/rest/v1/product_releases?{query}")
+          if len(rows) != 1:
+              raise SystemExit(f"Expected exactly one release row; found {len(rows)}")
+          old = rows[0]
+          if old["release_status"] != "review_required":
+              raise SystemExit("Release is not review_required; refusing to replace it.")
+          if old["name"] != "NetCmd ConfigGuard Lite" or old["version"] != "1.0.0":
+              raise SystemExit("Stored product identity/version does not match the expected release.")
+
+          root = Path("products/netcmd-configguard-lite")
+          files = [
+              "README.md",
+              "pyproject.toml",
+              "src/netcmd_configguard/__init__.py",
+              "src/netcmd_configguard/audit.py",
+              "examples/cisco-sample.cfg",
+              "examples/huawei-sample.cfg",
+          ]
+          package_test = Path("tests/test_netcmd_configguard_product.py")
+          if not package_test.is_file():
+              raise SystemExit("Expected offline unit test file is missing.")
+          files.append("tests/test_netcmd_configguard_product.py")
+
+          out = Path("rebuilt")
+          out.mkdir(exist_ok=True)
+          archive_path = out / "configguard-lite-1.0.0.zip"
+          manifest = {
+              "product_id": product_id,
+              "name": old["name"],
+              "version": old["version"],
+              "type": "offline_config_auditor",
+              "summary": "Offline, read-only Cisco, Huawei and Aruba configuration baseline auditor.",
+              "files": files,
+              "safety": "offline_read_only",
+              "dependencies": [],
+              "release_status": "review_required",
+              "execution_policy": "No network, device access, credential collection, or configuration changes.",
+              "limitations": [
+                  "Audits supplied text only; it does not verify live device state.",
+                  "A matching command is not proof of correct scope or secure values.",
+                  "Human review is required before any operational remediation."
+              ]
+          }
+
+          with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+              for relative in files:
+                  source = package_test if relative.startswith("tests/") else root / relative
+                  if not source.is_file():
+                      raise SystemExit(f"Missing package source: {relative}")
+                  archive.write(source, arcname=relative)
+              archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+
+          with zipfile.ZipFile(archive_path, "r") as archive:
+              bad = archive.testzip()
+              if bad:
+                  raise SystemExit(f"Rebuilt ZIP integrity test failed at {bad}")
+              names = set(archive.namelist())
+              expected = set(files) | {"manifest.json"}
+              if names != expected:
+                  raise SystemExit("Rebuilt ZIP file list does not match manifest.")
+          artifact = archive_path.read_bytes()
+          digest = hashlib.sha256(artifact).hexdigest()
+          encoded = base64.b64encode(artifact).decode("ascii")
+          if len(artifact) > 1_500_000:
+              raise SystemExit("Rebuilt artifact exceeds storage limit.")
+
+          patch_query = urlencode({
+              "product_id": "eq." + product_id,
+              "release_status": "eq.review_required",
+          })
+          updated = request_json(
+              "PATCH",
+              f"{origin}/rest/v1/product_releases?{patch_query}",
+              {
+                  "artifact_base64": encoded,
+                  "artifact_bytes": len(artifact),
+                  "sha256": digest,
+                  "manifest_json": manifest,
+              },
+          )
+          if len(updated) != 1:
+              raise SystemExit("Artifact update did not affect exactly one review_required release.")
+          saved = updated[0]
+          if saved["sha256"] != digest or int(saved["artifact_bytes"]) != len(artifact):
+              raise SystemExit("Stored artifact verification failed after update.")
+          if saved["release_status"] != "review_required":
+              raise SystemExit("Release status changed unexpectedly; stop for human review.")
+
+          print(f"Rebuilt and verified {product_id} v1.0.0: {len(artifact)} bytes.")
+          print(f"SHA-256: {digest}")
+          print("Stored artifact replaced; release remains review_required. No publishing, payment, or entitlement changes.")
+          PY
