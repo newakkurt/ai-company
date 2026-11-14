@@ -126,7 +126,7 @@ jobs:
               for info in infos:
                   name = info.filename
                   path = PurePosixPath(name)
-                  if (not name or name.startswith("/") or "\\\\" in name
+                  if (not name or name.startswith("/") or "\\" in name
                       or ":" in name or path.is_absolute() or ".." in path.parts):
                       raise SystemExit(f"Unsafe archive path: {name!r}")
                   if info.flag_bits & 0x1:
