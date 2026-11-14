@@ -129,6 +129,20 @@ class SupabaseTaskStore:
         self._event(task_id, "task_created", "user", {"mode": "dry_run"})
         return self.get_task(task_id)
 
+    def enable_scheduled_analysis_task(self, task_id: str, expected_description: str) -> bool:
+        """Opt in only an exact fixed playbook task to dry-run worker processing."""
+        changed = self._request("tasks", "PATCH", {
+            "task_id": f"eq.{task_id}", "description": f"eq.{expected_description}",
+            "status": "eq.planned", "execution_mode": "eq.dry_run",
+            "approval_required": "eq.true",
+        }, {"approval_required": False, "updated_at": utc_now()}, "return=representation")
+        if changed:
+            self._event(task_id, "scheduled_analysis_enabled", "scheduler", {
+                "policy": "fixed_playbook_dry_run_only",
+                "external_actions": False,
+            })
+        return bool(changed)
+
     def get_payment_event(self, event_id: str):
         rows = self._request("payment_events", params={
             "select": "event_id,event_type,subscription_id,processed,received_at",
@@ -992,6 +1006,23 @@ class TaskStore:
             if len(results) >= limit:
                 break
         return results
+
+    def enable_scheduled_analysis_task(self, task_id: str, expected_description: str) -> bool:
+        """Opt in only an exact fixed playbook task to dry-run worker processing."""
+        now = utc_now()
+        with self._connect() as db:
+            changed = db.execute(
+                """UPDATE tasks SET approval_required=0, updated_at=?
+                   WHERE task_id=? AND description=? AND status='planned'
+                   AND execution_mode='dry_run' AND approval_required=1""",
+                (now, task_id, expected_description),
+            )
+            if changed.rowcount:
+                self._event(db, task_id, "scheduled_analysis_enabled", "scheduler", {
+                    "policy": "fixed_playbook_dry_run_only",
+                    "external_actions": False,
+                })
+        return bool(changed.rowcount)
 
     def get_task(self, task_id: str):
         with self._connect() as db:
