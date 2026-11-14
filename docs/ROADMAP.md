@@ -14,7 +14,8 @@ Status snapshot: 2026-11-14, after Groq retry fix, scheduler queue repair, Pytho
 
 ## Verified production snapshot
 
-- Render service: `https://ai-company-ferd.onrender.com`; deployment `dep-dbs4a6rji66s739jmiog` is live on commit `40887f5a1af09344b6b3f29d9785f69a2c43aa2f`. Render logs confirm application startup, HTTP `/` 200, and `/readyz` 200 at 2026-11-14 11:27 UTC.\n- Render deployment failure root cause: the platform defaulted to Python 3.14.10 while the project CI/runtime target is Python 3.12; the repository now pins Python 3.12 and the subsequent deployment succeeded.
+- Render service: `https://ai-company-ferd.onrender.com`; deployment `dep-dbs4a6rji66s739jmiog` is live on commit `40887f5a1af09344b6b3f29d9785f69a2c43aa2f`. Render logs confirm application startup, HTTP `/` 200, and `/readyz` 200 at 2026-11-14 11:27 UTC.
+- Render deployment failure root cause: the platform defaulted to Python 3.14.10 while the project CI/runtime target is Python 3.12; the repository now pins Python 3.12 and the subsequent deployment succeeded.
 - Worker mode: GitHub Actions scheduled `python -m company.worker --once`; Render embedded worker is configured off.
 - Provider: GitHub Actions selected Groq directly (`openai/gpt-oss-20b`). The dedicated task `smoke-groq-provider-20261113-1900` completed with four persisted outputs, proving a real Groq-backed call. The 2026-11-14 worker also selected Groq. A Groq phantom-tool-call HTTP 400 fix is deployed; the affected Instagram draft is eligible for a bounded retry after its 30-minute cooldown. Worker cron `*/5` and manual `workflow_dispatch` are configured; scheduled worker runs have been observed. Render's embedded worker remains off.
 - Supabase CRM: 16 companies were checked in bounded batches: 10 `reachable_match`, 2 `reachable_no_match`, 2 `too_large`, 2 `unreachable`. A reachable match is source evidence, not human identity/legal approval; all remain in `new` stage. Live table inspection also shows 16 draft offers, 16 pending follow-ups, and no CRM contacts yet; these are drafts/work items, not qualified customers or sent proposals.
@@ -36,7 +37,19 @@ Status snapshot: 2026-11-14, after Groq retry fix, scheduler queue repair, Pytho
 
 ## Queue-safety hardening completed on 2026-11-14
 
-- [x] Fix Groq `gpt-oss` phantom tool-call HTTP 400 failures with plain-text-only instructions and bounded retries.\n- [x] Allow only fixed scheduler playbooks to opt out of per-task approval; manual/recovery tasks remain approval-gated.\n- [x] Add conditional approval checks to failed-task retry and stale-lease recovery updates.\n- [x] Migrate only untouched legacy scheduler rows whose deterministic task ID and full description match the playbook; rows with prior claims, failures, retries, dead-letter history, or agent outputs stay gated.\n- [x] Add regression tests for approval gates and legacy-task migration; Python 3.10/3.11/3.12 CI passed.\n- [x] Restore the approval gate on `auto-marketing-conversion-analysis-2026w46` after prior outputs and human-review escalation were detected.\n\n## Product QA workflow added on 2026-11-14\n\n- [x] Add a manual GitHub Actions workflow at `.github/workflows/product-offline-qa.yml` to fetch a release by exact product ID, verify stored byte count and SHA-256, scan archive paths/secrets/risky source patterns, and run package tests in a Docker container with `--network none`. It never publishes or changes release status.\n- [ ] Owner: run **Offline Product Release QA** for `prd-1cdfbb2727ef`, inspect the result, then request publication approval against the exact product ID and SHA-256. The release remains `review_required` until that separate approval flow is completed.\n\n## Remaining engineering work
+- [x] Fix Groq `gpt-oss` phantom tool-call HTTP 400 failures with plain-text-only instructions and bounded retries.
+- [x] Allow only fixed scheduler playbooks to opt out of per-task approval; manual/recovery tasks remain approval-gated.
+- [x] Add conditional approval checks to failed-task retry and stale-lease recovery updates.
+- [x] Migrate only untouched legacy scheduler rows whose deterministic task ID and full description match the playbook; rows with prior claims, failures, retries, dead-letter history, or agent outputs stay gated.
+- [x] Add regression tests for approval gates and legacy-task migration; Python 3.10/3.11/3.12 CI passed.
+- [x] Restore the approval gate on `auto-marketing-conversion-analysis-2026w46` after prior outputs and human-review escalation were detected.
+
+## Product QA workflow added on 2026-11-14
+
+- [x] Add a manual GitHub Actions workflow at `.github/workflows/product-offline-qa.yml` to fetch a release by exact product ID, verify stored byte count and SHA-256, scan archive paths/secrets/risky source patterns, and run package tests in a Docker container with `--network none`. It never publishes or changes release status.
+- [ ] Owner: run **Offline Product Release QA** for `prd-1cdfbb2727ef`, inspect the result, then request publication approval against the exact product ID and SHA-256. The release remains `review_required` until that separate approval flow is completed.
+
+## Remaining engineering work
 
 - [ ] Quota-aware deferred retry / dead-letter recovery UI and safe operator controls (the scheduler already has bounded retry logic; operator UI remains missing).
 - [ ] CRM source-review UI with evidence, contact legal basis, suppression and human approval.
@@ -57,4 +70,4 @@ A green unit-test run or HTTP health check is not proof of a live sale. Do not m
 - Updated `company/llm.py`: Groq HTTP 413 responses explicitly identified as TPM failures now progressively reduce the user-context excerpt before retrying (preserving the prompt beginning and ending); HTTP 429 continues to use bounded Retry-After/backoff. The retry limit remains 3 total attempts.
 - Added a regression test in `tests/test_llm.py` verifying the HTTP 413 retry uses a shorter prompt; removed the obsolete wait-only test.
 - Commits: `1c7cee2` (initial retry handling), `529d0a0` and `629599b` (adaptive excerpt and literal correction), `37cc88d` and `d6639eb` (regression test).
-- Verification limitation: source and test changes were read back from GitHub, but the test suite and hosted worker deployment have not yet been executed/confirmed. Existing failed tasks were not manually retried, and approval-gated tasks remain untouched.
+- Verification limitation: source and test changes were read back from GitHub; the Render web service deployment and `/readyz` health response were confirmed live, but the full unit-test suite has not yet been run in this session. Existing failed tasks were not manually retried, and approval-gated tasks remain untouched.
