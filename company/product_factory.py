@@ -25,7 +25,7 @@ FACTORY_MAX_OUTPUT_TOKENS = 32000
 MAX_FILES = 18
 MAX_FILE_BYTES = 180_000
 MAX_TOTAL_BYTES = 900_000
-ALLOWED_SUFFIXES = {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".html", ".css", ".js", ".ts", ".sql"}
+ALLOWED_SUFFIXES = {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".html", ".css", ".js", ".ts", ".sql", ".cfg"}
 SECRET_PATTERNS = [
     re.compile(r"(?i)(api[_-]?key|password|secret|token)\s*[:=]\s*['\"][^'\"]{8,}['\"]"),
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -100,7 +100,15 @@ def _clean_files(raw: object) -> tuple[dict[str, str], list[str]]:
         if not isinstance(name, str) or not isinstance(content, str):
             raise ValueError("Generated files must map string paths to string content")
         path = PurePosixPath(name)
-        if path.is_absolute() or ".." in path.parts or not path.parts or path.suffix.lower() not in ALLOWED_SUFFIXES:
+        if (
+            path.is_absolute()
+            or "\\" in name
+            or "\x00" in name
+            or ":" in name
+            or ".." in path.parts
+            or not path.parts
+            or path.suffix.lower() not in ALLOWED_SUFFIXES
+        ):
             raise ValueError(f"Unsafe or unsupported generated path: {name!r}")
         if name in cleaned or len(content.encode("utf-8")) > MAX_FILE_BYTES:
             raise ValueError(f"Duplicate or oversized file: {name}")
