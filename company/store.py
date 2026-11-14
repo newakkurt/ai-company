@@ -130,7 +130,17 @@ class SupabaseTaskStore:
         return self.get_task(task_id)
 
     def enable_scheduled_analysis_task(self, task_id: str, expected_description: str) -> bool:
-        """Opt in only an exact fixed playbook task to dry-run worker processing."""
+        """Opt in only an exact, untouched fixed playbook task to dry-run processing."""
+        history = self._request("events", params={
+            "select": "event_id", "task_id": f"eq.{task_id}",
+            "event_type": "in.(agent_task_claimed,agent_task_failed,agent_task_retried,agent_task_dead_lettered)",
+            "limit": "1",
+        })
+        outputs = self._request("agent_outputs", params={
+            "select": "output_id", "task_id": f"eq.{task_id}", "limit": "1",
+        })
+        if history or outputs:
+            return False
         changed = self._request("tasks", "PATCH", {
             "task_id": f"eq.{task_id}", "description": f"eq.{expected_description}",
             "status": "eq.planned", "execution_mode": "eq.dry_run",
@@ -1008,9 +1018,22 @@ class TaskStore:
         return results
 
     def enable_scheduled_analysis_task(self, task_id: str, expected_description: str) -> bool:
-        """Opt in only an exact fixed playbook task to dry-run worker processing."""
+        """Opt in only an exact, untouched fixed playbook task to dry-run processing."""
         now = utc_now()
         with self._connect() as db:
+            history = db.execute(
+                """SELECT 1 FROM events WHERE task_id=?
+                   AND event_type IN ('agent_task_claimed','agent_task_failed',
+                                      'agent_task_retried','agent_task_dead_lettered')
+                   LIMIT 1""",
+                (task_id,),
+            ).fetchone()
+            outputs = db.execute(
+                "SELECT 1 FROM agent_outputs WHERE task_id=? LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            if history or outputs:
+                return False
             changed = db.execute(
                 """UPDATE tasks SET approval_required=0, updated_at=?
                    WHERE task_id=? AND description=? AND status='planned'
