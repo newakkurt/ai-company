@@ -97,12 +97,12 @@ class CeoContextBudgetTests(unittest.TestCase):
 
 
 class WebEvidenceInjectionTests(unittest.TestCase):
-    def _run(self, supports_search):
+    def _run(self, supports_search, agents=("research_intelligence", "qa_testing")):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         store = TaskStore(Path(tmp.name) / "e.db")
         task = store.create_task("Research demand for network config tools")
-        store.assign_agents(task["task_id"], ["research_intelligence", "qa_testing"])
+        store.assign_agents(task["task_id"], list(agents))
         provider = Mock()
         provider.supports_search = supports_search
         provider.tiered = False
@@ -116,6 +116,10 @@ class WebEvidenceInjectionTests(unittest.TestCase):
         calls = self._run(False)
         prompts = [c.args[1] for c in calls]
         self.assertEqual(sum("Live public evidence" in p for p in prompts), 1)
+
+    def test_network_infrastructure_role_gets_evidence_too(self):
+        calls = self._run(False, agents=("network_infrastructure", "qa_testing"))
+        self.assertEqual(sum("Live public evidence" in c.args[1] for c in calls), 1)
 
     def test_no_injection_when_provider_has_native_search(self):
         calls = self._run(True)

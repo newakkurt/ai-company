@@ -7,6 +7,8 @@ from .store import TaskStore
 
 # Roles that need live public-web evidence (companies, competitors, demand).
 SEARCH_AGENTS = frozenset({"research_intelligence", "marketing_growth", "product_business"})
+# Roles that receive the public demand evidence block when the provider cannot browse.
+EVIDENCE_AGENTS = SEARCH_AGENTS | {"network_infrastructure"}
 
 
 def _generate(provider, agent, system_prompt: str, prompt: str) -> str:
@@ -130,7 +132,7 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
                 + build_specialist_context(results)
             )
         evidence_context = ""
-        if agent.id in SEARCH_AGENTS and not getattr(provider, "supports_search", False):
+        if agent.id in EVIDENCE_AGENTS and not getattr(provider, "supports_search", False):
             # No native grounding (e.g. Groq): give research roles real public demand signals
             # as quoted evidence instead of letting them write market claims from memory.
             from .research_sources import demand_evidence_block
