@@ -9,18 +9,18 @@ Status snapshot: 2026-11-14, after Groq retry fix, scheduler queue repair, Pytho
 - [x] Hosted readiness monitor previously passed: 14 agents, Supabase connected, analysis-only mode. The embedded worker is now intentionally disabled in favor of the scheduled Actions consumer.
 - [x] Supabase migrations through `20261112145112_product_download_rpc_security_invoker` were previously applied (20 recorded migrations); the 2026-11-13 performance SQL was applied directly and its idempotent migration file is committed for future environments.
 - [x] RLS is enabled on approval, product, mail, CRM, membership and payment tables; latest Supabase security advisor returned zero lints.
-- [x] Python 3.10, 3.11 and 3.12 CI passed on commit `62b1ca7a03d8d8b65ee291d1e852057dd3d464e8`.
+- [x] Python 3.10, 3.11 and 3.12 CI passed on commit `10767e37a16dd2319c2183a34914f8dfdedae80b`; product ZIP persistence regression tests are included.
 - [x] GitHub Actions is the selected queue consumer; Render embedded worker has been switched off to prevent two consumers racing on the same queue.
 
 ## Verified production snapshot
 
-- Render service: `https://ai-company-ferd.onrender.com`; deployment `dep-dbs4a6rji66s739jmiog` is live on commit `40887f5a1af09344b6b3f29d9785f69a2c43aa2f`. Render logs confirm application startup, HTTP `/` 200, and `/readyz` 200 at 2026-11-14 11:27 UTC.
+- Render service: `https://ai-company-ferd.onrender.com`; deployment `dep-dbs4d7vj5k9c73ehtar0` is live on commit `858d1495a31fe038cef8254a61624fda19ecd329`. Latest hosted readiness monitor passed at 11:32 UTC+3.
 - Render deployment failure root cause: the platform defaulted to Python 3.14.10 while the project CI/runtime target is Python 3.12; the repository now pins Python 3.12 and the subsequent deployment succeeded.
-- Worker mode: GitHub Actions scheduled `python -m company.worker --once`; Render embedded worker is configured off.
+- Worker mode: GitHub Actions scheduled `python -m company.worker --once`; `/readyz` confirms Render worker `enabled=false`, `running=false`, `mode=disabled`, and `worker_mode=github_actions_schedule`.
 - Provider: GitHub Actions selected Groq directly (`openai/gpt-oss-20b`). The dedicated task `smoke-groq-provider-20261113-1900` completed with four persisted outputs, proving a real Groq-backed call. The 2026-11-14 worker also selected Groq. A Groq phantom-tool-call HTTP 400 fix is deployed; the affected Instagram draft is eligible for a bounded retry after its 30-minute cooldown. Worker cron `*/5` and manual `workflow_dispatch` are configured; scheduled worker runs have been observed. Render's embedded worker remains off.
 - Supabase CRM: 16 companies were checked in bounded batches: 10 `reachable_match`, 2 `reachable_no_match`, 2 `too_large`, 2 `unreachable`. A reachable match is source evidence, not human identity/legal approval; all remain in `new` stage. Live table inspection also shows 16 draft offers, 16 pending follow-ups, and no CRM contacts yet; these are drafts/work items, not qualified customers or sent proposals.
 - Queue at latest direct Supabase inspection (2026-11-14 14:27 UTC+3): 19 completed tasks, 23 failed tasks, 0 currently planned tasks, and 15 dead-letter records. All 23 failed tasks are approval-gated; none was manually retried. Historical events and outputs remain retained.
-- Commerce: 1 product release remains `review_required`; its persisted ZIP SHA-256 matches the stored bytes, but runtime QA is pending. Payment events, ledger entries, memberships, entitlements and bank settlements are all 0. `/readyz` confirms BMC webhook/product mappings, SMTP and Telegram owner notifications are not configured; mail remains draft-only. No paid sale or buyer delivery has been proven.
+- Commerce: `NetCmd ConfigGuard Lite` (`prd-1cdfbb2727ef`, v1.0.0) remains `review_required`; its rebuilt 6,352-byte ZIP is verified with SHA-256 `6b22dc7716d94df99df0f0596afa4d658ce706741d08e99f77dd169af62ad206`. Offline Docker QA passed (static scan plus 5 tests, network disabled). Payment events, ledger entries, memberships, entitlements and bank settlements remain 0. `/readyz` confirms BMC webhook/product mappings, SMTP and Telegram owner notifications are not configured; mail remains draft-only. No paid sale or buyer delivery has been proven.
 - Security advisor: zero lints. Performance advisor: the 10 missing foreign-key indexes and 12 RLS initplan policies are fixed; only 16 informational unused-index notices remain. New FK indexes are intentionally retained for referential integrity and expected future lookups.
 
 ## Required before autonomous operation
@@ -29,7 +29,7 @@ Status snapshot: 2026-11-14, after Groq retry fix, scheduler queue repair, Pytho
 2. [x] Verify Groq end-to-end: the dedicated Groq smoke task completed with four persisted agent outputs. Worker logs confirm `provider_route=groq` and task completion. The Turkish SEO article and three-email educational sequence were generated and persisted by the content agent in analysis-only mode; neither was published or sent.
 3. [ ] Recover only eligible failed/dead-letter tasks in bounded batches after provider verification; preserve all original events and outputs. Approval-required tasks remain blocked. Retry and stale-lease recovery now recheck `approval_required=false` in both selection and conditional update.
 4. [x] Run the 16-source verification backfill. Human review is still required for no-match, too-large and unreachable records, and before any outreach.
-5. [ ] Generate a product release, inspect the ZIP, run it in an isolated QA environment (network disabled, resource/dependency scan), then approve publication against its exact product ID and SHA-256.
+5. [x] Rebuild, inspect and run offline QA for ConfigGuard Lite 1.0.0 (network disabled, static scan, 5 tests). [ ] Separate human publication approval is still required for exact product ID `prd-1cdfbb2727ef` and SHA-256 `6b22dc7716d94df99df0f0596afa4d658ce706741d08e99f77dd169af62ad206`; the release remains `review_required`.
 6. [ ] Owner action: create/confirm the real recurring NetCmd PRO membership in Buy Me a Coffee, copy its actual membership level ID to `BMC_PRO_MEMBERSHIP_LEVEL_ID`, set the same webhook signing secret in BMC and Render, and map verified Shop item IDs to published release IDs/prices. These account-side values cannot be guessed.
 7. [ ] Owner action: configure a dedicated support mailbox and SMTP credentials. Keep mail in draft mode until authentication headers and sender limits are validated.
 8. [ ] Optional owner action: configure Telegram owner notifications with a company-specific bot/chat; do not reuse unrelated personal bots.
@@ -46,8 +46,10 @@ Status snapshot: 2026-11-14, after Groq retry fix, scheduler queue repair, Pytho
 
 ## Product QA workflow added on 2026-11-14
 
-- [x] Add a manual GitHub Actions workflow at `.github/workflows/product-offline-qa.yml` to fetch a release by exact product ID, verify stored byte count and SHA-256, scan archive paths/secrets/risky source patterns, and run package tests in a Docker container with `--network none`. It never publishes or changes release status.
-- [ ] Owner: run **Offline Product Release QA** for `prd-1cdfbb2727ef`, inspect the result, then request publication approval against the exact product ID and SHA-256. The release remains `review_required` until that separate approval flow is completed.
+- [x] Add `.github/workflows/rebuild-configguard-release.yml` to rebuild the exact existing artifact from reviewed repository sources and replace only the stored artifact while preserving `review_required`.
+- [x] Add `.github/workflows/product-offline-qa.yml` to verify stored bytes/SHA, scan archive paths/secrets/risky source patterns, and run tests in Docker with `--network none`.
+- [x] Rebuild run `43590211991` and QA run `43590240059` both succeeded; the QA run completed 5 tests. Neither workflow publishes or changes release status.
+- [ ] Owner: inspect the verified release and approve publication separately against product ID `prd-1cdfbb2727ef` and SHA-256 `6b22dc7716d94df99df0f0596afa4d658ce706741d08e99f77dd169af62ad206`.
 
 ## Remaining engineering work
 
@@ -59,7 +61,7 @@ Status snapshot: 2026-11-14, after Groq retry fix, scheduler queue repair, Pytho
 - [ ] Durable backup and restore rehearsal for Supabase and product artifacts. No backup/restore rehearsal is currently evidenced.
 - [ ] Production monitoring, dead-letter review UI and alert thresholds.
 - [x] Add indexes for 10 uncovered foreign keys and convert 12 RLS gate policies to initplan-safe scalar subqueries; advisor confirms no FK-index or RLS-initplan warnings.
-- [ ] True isolated runtime QA and supply-chain/dependency scanning for generated ZIPs.
+- [x] ConfigGuard Lite 1.0.0 isolated runtime QA and static archive/source scan completed.\n- [x] Validate ZIP integrity, CRC, paths, symlinks, encryption, entry/size limits before either local or Supabase product-release persistence; regression tests added. Apply the same offline QA gate to future generated releases.
 - [ ] Invoice, VAT, accounting and payout-to-bank reconciliation. These require owner/accountant review and real payout/bank evidence.
 
 A green unit-test run or HTTP health check is not proof of a live sale. Do not mark the company fully operational until the production gates above are completed with real, owner-approved tests.
@@ -70,7 +72,7 @@ A green unit-test run or HTTP health check is not proof of a live sale. Do not m
 - Updated `company/llm.py`: Groq HTTP 413 responses explicitly identified as TPM failures now progressively reduce the user-context excerpt before retrying (preserving the prompt beginning and ending); HTTP 429 continues to use bounded Retry-After/backoff. The retry limit remains 3 total attempts.
 - Added a regression test in `tests/test_llm.py` verifying the HTTP 413 retry uses a shorter prompt; removed the obsolete wait-only test.
 - Commits: `1c7cee2` (initial retry handling), `529d0a0` and `629599b` (adaptive excerpt and literal correction), `37cc88d` and `d6639eb` (regression test).
-- Verification limitation: source and test changes were read back from GitHub; the Render web service deployment and `/readyz` health response were confirmed live, but the full unit-test suite has not yet been run in this session. Existing failed tasks were not manually retried, and approval-gated tasks remain untouched.
+- Verification: full Python unit-test suite passed on Python 3.10, 3.11 and 3.12 on commit `10767e37a16dd2319c2183a34914f8dfdedae80b`; Render deployment `dep-dbs4d7vj5k9c73ehtar0` is live and hosted readiness passed. Existing failed tasks were not manually retried; all approval-gated tasks remain untouched.
 
 
 ## 2026-11-14 — Explicit worker provider routing
