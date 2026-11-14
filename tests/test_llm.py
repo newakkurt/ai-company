@@ -77,6 +77,36 @@ class GeminiProviderTests(unittest.TestCase):
                 self.assertEqual(provider.generate("system", "user"), "Groq OK")
         sleep.assert_called_once_with(60)
 
+    def test_groq_system_prompt_states_that_no_tools_exist(self):
+        response = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
+        with patch("company.llm.urlopen", return_value=response) as request:
+            GroqProvider(api_key="groq-test-key").generate("system", "user")
+        payload = json.loads(request.call_args.args[0].data.decode("utf-8"))
+        self.assertNotIn("tools", payload)
+        self.assertIn("No tools", payload["messages"][0]["content"])
+
+    def test_groq_phantom_tool_call_400_is_retried_then_succeeds(self):
+        def phantom():
+            return HTTPError(
+                GroqProvider.ENDPOINT, 400, "Bad Request", {},
+                io.BytesIO(b'{"error":{"message":"Tool choice is none, but model called a tool"}}'),
+            )
+        success = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
+        with patch("company.llm.urlopen", side_effect=[phantom(), phantom(), success]) as request:
+            self.assertEqual(GroqProvider(api_key="groq-test-key").generate("s", "u"), "Groq OK")
+        self.assertEqual(request.call_count, 3)
+
+    def test_groq_phantom_tool_call_retry_is_bounded(self):
+        def phantom():
+            return HTTPError(
+                GroqProvider.ENDPOINT, 400, "Bad Request", {},
+                io.BytesIO(b'{"error":{"message":"Tool choice is none, but model called a tool"}}'),
+            )
+        with patch("company.llm.urlopen", side_effect=[phantom(), phantom(), phantom(), phantom()]) as request:
+            with self.assertRaises(GroqAPIError):
+                GroqProvider(api_key="groq-test-key").generate("s", "u")
+        self.assertEqual(request.call_count, 3)
+
     def test_groq_uses_a_small_default_output_budget(self):
         response = FakeResponse(b'{"choices":[{"message":{"content":"Groq OK"}}]}')
         with patch("company.llm.urlopen", return_value=response) as request:
