@@ -354,6 +354,28 @@ class ProviderSelectionTests(unittest.TestCase):
         self.assertIsInstance(provider.primary, GeminiProvider)
         self.assertIsInstance(provider.fallback, GroqProvider)
 
+    def test_explicit_groq_selection_overrides_configured_gemini_key(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "AI_COMPANY_PROVIDER": "groq",
+                "GEMINI_API_KEY": "gemini-test-key",
+                "GROQ_API_KEY": "groq-test-key",
+            },
+            clear=True,
+        ):
+            provider = _get_cloud_provider()
+        self.assertIsInstance(provider, GroqProvider)
+
+    def test_explicit_groq_selection_without_groq_key_does_not_use_gemini(self):
+        with patch.dict(
+            "os.environ",
+            {"AI_COMPANY_PROVIDER": "groq", "GEMINI_API_KEY": "gemini-test-key"},
+            clear=True,
+        ):
+            provider = _get_cloud_provider()
+        self.assertIsNone(provider)
+
     def test_no_provider_key_returns_none(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertIsNone(_get_cloud_provider())
