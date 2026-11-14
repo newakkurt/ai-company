@@ -1,4 +1,6 @@
 """Runs specialist analysis with a local model, then asks CEO to synthesize it."""
+import os
+
 from .agents import load_agents, route_task
 from .llm import get_provider
 from .store import TaskStore
@@ -17,6 +19,36 @@ def _generate(provider, agent, system_prompt: str, prompt: str) -> str:
     if use_search:
         return provider.generate(system_prompt, prompt, use_search=True)
     return provider.generate(system_prompt, prompt)
+
+
+# Free-tier providers (e.g. Groq on_demand) enforce a small tokens-per-minute budget and answer
+# HTTP 413 when the CEO synthesis prompt carries every specialist report in full. Persisted
+# outputs stay complete; only the prompt excerpt is bounded. Raise it on a paid tier.
+DEFAULT_CEO_CONTEXT_CHARS = 7000
+MIN_EXCERPT_CHARS = 600
+
+
+def ceo_context_budget() -> int:
+    try:
+        value = int(os.getenv("AI_COMPANY_CEO_CONTEXT_CHARS", DEFAULT_CEO_CONTEXT_CHARS))
+    except ValueError:
+        value = DEFAULT_CEO_CONTEXT_CHARS
+    return max(2000, value)
+
+
+def build_specialist_context(results: list[dict], budget: int | None = None) -> str:
+    """Join specialist outputs for the CEO, splitting the character budget evenly."""
+    budget = budget or ceo_context_budget()
+    if not results:
+        return ""
+    per_agent = max(MIN_EXCERPT_CHARS, budget // len(results))
+    parts = []
+    for item in results:
+        text = item["output"]
+        if len(text) > per_agent:
+            text = text[:per_agent].rstrip() + f"\n…[excerpt: {len(item['output']) - per_agent} more chars omitted]"
+        parts.append(f"[{item['agent_id']}]\n{text}")
+    return "\n\n".join(parts)
 
 
 def _checkpoint(output: str) -> str:
@@ -93,8 +125,9 @@ def run_task(task_id: str, store=None, provider=None) -> list[dict]:
             continue
         specialist_context = ""
         if agent.id == "ceo":
-            specialist_context = "\n\nSpecialist analysis (unverified suggestions):\n" + "\n\n".join(
-                f"[{item['agent_id']}]\n{item['output']}" for item in results
+            specialist_context = (
+                "\n\nSpecialist analysis (unverified suggestions; excerpts, full text is stored):\n"
+                + build_specialist_context(results)
             )
         prompt = (
             f"Task ID: {task_id}\nTask description: {task['description']}\n"

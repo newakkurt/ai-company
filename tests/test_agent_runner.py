@@ -1,7 +1,8 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, call
+from unittest.mock import Mock, call, patch
 
 from company.agent_runner import build_system_prompt, run_task
 from company.store import TaskStore
@@ -68,3 +69,28 @@ class AgentRunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class CeoContextBudgetTests(unittest.TestCase):
+    def test_context_is_bounded_but_every_specialist_is_represented(self):
+        from company.agent_runner import build_specialist_context
+        results = [{"agent_id": f"a{i}", "output": "x" * 6000} for i in range(4)]
+        text = build_specialist_context(results, budget=4000)
+        self.assertLessEqual(len(text), 4000 + 4 * 120)  # budget plus short markers
+        for i in range(4):
+            self.assertIn(f"[a{i}]", text)
+        self.assertIn("omitted", text)
+
+    def test_short_outputs_are_not_truncated(self):
+        from company.agent_runner import build_specialist_context
+        text = build_specialist_context([{"agent_id": "a", "output": "short report"}], budget=4000)
+        self.assertIn("short report", text)
+        self.assertNotIn("omitted", text)
+
+    def test_budget_env_override_has_a_floor(self):
+        from company.agent_runner import ceo_context_budget
+        with patch.dict(os.environ, {"AI_COMPANY_CEO_CONTEXT_CHARS": "10"}):
+            self.assertEqual(ceo_context_budget(), 2000)
+        with patch.dict(os.environ, {"AI_COMPANY_CEO_CONTEXT_CHARS": "bad"}):
+            self.assertEqual(ceo_context_budget(), 7000)
