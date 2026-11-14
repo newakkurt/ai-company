@@ -147,7 +147,8 @@ class GeminiProvider:
                 if quota_ids:
                     summary += "; quota=" + ",".join(quota_ids)
                 if detail_types:
-                    summary += "; details=" + ",".join(detail_types)                if safe_description:
+                    summary += "; details=" + ",".join(detail_types)
+                if safe_description:
                     summary += "; description=" + safe_description
                 elif safe_message:
                     summary += "; " + safe_message
