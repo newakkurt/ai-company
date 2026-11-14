@@ -1,0 +1,182 @@
+name: Offline Product Release QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_id:
+        description: "Exact product release ID from Supabase"
+        required: true
+        default: "prd-1cdfbb2727ef"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  offline-release-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download and verify exact stored artifact
+        env:
+          PRODUCT_ID: ${{ inputs.product_id }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_DB_GATE_KEY: ${{ secrets.SUPABASE_DB_GATE_KEY }}
+        run: |
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import re
+          from pathlib import Path
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          product_id = os.environ["PRODUCT_ID"].strip()
+          if not re.fullmatch(r"prd-[a-f0-9]{12}", product_id):
+              raise SystemExit("Invalid product_id format")
+          origin = os.environ["SUPABASE_URL"].strip().rstrip("/")
+          if not origin.startswith("https://"):
+              raise SystemExit("SUPABASE_URL must use HTTPS")
+          query = urlencode({
+              "select": "product_id,name,version,release_status,manifest_json,sha256,artifact_bytes,artifact_base64",
+              "product_id": f"eq.{product_id}",
+          })
+          request = Request(
+              f"{origin}/rest/v1/product_releases?{query}",
+              headers={
+                  "apikey": os.environ["SUPABASE_ANON_KEY"],
+                  "Authorization": "Bearer " + os.environ["SUPABASE_ANON_KEY"],
+                  "X-AI-Company-Key": os.environ["SUPABASE_DB_GATE_KEY"],
+                  "Accept": "application/json",
+              },
+          )
+          with urlopen(request, timeout=30) as response:
+              rows = json.loads(response.read().decode("utf-8"))
+          if len(rows) != 1:
+              raise SystemExit(f"Expected exactly one release row; found {len(rows)}")
+          row = rows[0]
+          artifact = base64.b64decode(row["artifact_base64"], validate=True)
+          digest = hashlib.sha256(artifact).hexdigest()
+          if len(artifact) != int(row["artifact_bytes"]):
+              raise SystemExit("Stored artifact byte count mismatch")
+          if digest != row["sha256"]:
+              raise SystemExit("Stored artifact SHA-256 mismatch")
+          if row["release_status"] != "review_required":
+              raise SystemExit("Release status changed; stop and review before QA")
+          out = Path("qa-input")
+          out.mkdir(exist_ok=True)
+          (out / "release.zip").write_bytes(artifact)
+          (out / "manifest.json").write_text(
+              json.dumps(row["manifest_json"], ensure_ascii=False), encoding="utf-8"
+          )
+          print(
+              f"Verified {row['product_id']} v{row['version']}: "
+              f"{len(artifact)} bytes, SHA-256 {digest}"
+          )
+          print("Release remains review_required; this workflow never publishes or changes status.")
+          PY
+
+      - name: Static archive and source safety scan
+        run: |
+          python - <<'PY'
+          import ast
+          import json
+          import re
+          import stat
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          manifest = json.loads(Path("qa-input/manifest.json").read_text(encoding="utf-8"))
+          if manifest.get("safety") != "offline_read_only":
+              raise SystemExit("Manifest does not declare offline_read_only")
+          if manifest.get("dependencies") not in ([], None):
+              raise SystemExit("Unexpected third-party runtime dependencies")
+
+          allowed = {".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml",
+                     ".html", ".css", ".js", ".ts", ".sql", ".cfg", ""}
+          secret_patterns = [
+              re.compile(r"(?i)(api[_-]?key|password|secret|token)\\s*[:=]\\s*['\\\"][^'\\\"]{8,}['\\\"]"),
+              re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+          ]
+          risky_patterns = [
+              re.compile(r"(?i)\\b(eval|exec)\\s*\\("),
+              re.compile(r"(?i)\\b(subprocess|os\\.system|os\\.popen|pty\\.)"),
+              re.compile(r"(?i)\\b(requests\\.(?:get|post)|urlopen|httpx\\.|aiohttp\\.)"),
+              re.compile(r"(?i)\\b(socket|paramiko|netmiko)\\b"),
+          ]
+
+          archive_path = Path("qa-input/release.zip")
+          with zipfile.ZipFile(archive_path) as archive:
+              infos = archive.infolist()
+              if not infos or len(infos) > 24:
+                  raise SystemExit("Unexpected archive entry count")
+              names = set()
+              total_size = 0
+              for info in infos:
+                  name = info.filename
+                  path = PurePosixPath(name)
+                  if (not name or name.startswith("/") or "\\\\" in name
+                      or ":" in name or path.is_absolute() or ".." in path.parts):
+                      raise SystemExit(f"Unsafe archive path: {name!r}")
+                  if info.flag_bits & 0x1:
+                      raise SystemExit("Encrypted archive entries are not allowed")
+                  mode = (info.external_attr >> 16) & 0o170000
+                  if mode == stat.S_IFLNK:
+                      raise SystemExit(f"Symlink entry rejected: {name}")
+                  if not info.is_dir() and path.suffix.lower() not in allowed:
+                      raise SystemExit(f"Unsupported file type: {name}")
+                  if info.file_size > 180_000:
+                      raise SystemExit(f"File exceeds size limit: {name}")
+                  if info.compress_size and info.file_size / info.compress_size > 60:
+                      raise SystemExit(f"Suspicious compression ratio: {name}")
+                  total_size += info.file_size
+                  if total_size > 1_500_000:
+                      raise SystemExit("Archive expands beyond size limit")
+                  names.add(name.rstrip("/"))
+                  if path.suffix.lower() == ".py":
+                      source = archive.read(info).decode("utf-8")
+                      ast.parse(source, filename=name)
+                      for pattern in secret_patterns:
+                          if pattern.search(source):
+                              raise SystemExit(f"Possible hard-coded secret in {name}")
+                      for pattern in risky_patterns:
+                          if pattern.search(source):
+                              raise SystemExit(f"Manual security review required for {name}")
+              expected = set(manifest.get("files") or [])
+              missing = expected - names
+              if missing:
+                  raise SystemExit("Manifest files missing from ZIP: " + ", ".join(sorted(missing)))
+              archive.extractall("qa-work")
+          print(f"Static QA passed: {len(infos)} entries, {total_size} expanded bytes.")
+          PY
+
+      - name: Pull isolated Python runtime
+        run: docker pull python:3.12-slim
+
+      - name: Run package tests with network disabled
+        run: |
+          docker run --rm \
+            --network none \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --pids-limit 64 \
+            --memory 512m \
+            --cpus 1 \
+            --user 65534:65534 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e PYTHONPATH=/work/src \
+            -v "$PWD/qa-work:/work:ro" \
+            -w /work \
+            python:3.12-slim \
+            python -m unittest discover -s tests -v
+
+      - name: Record QA outcome
+        run: echo "Offline runtime QA passed. No publication, payment, entitlement, or release-status change was performed."
