@@ -60,7 +60,18 @@ class AgentRunnerTests(unittest.TestCase):
         from company.agents import load_agents
         ceo = next(agent for agent in load_agents() if agent.id == "ceo")
         prompt = build_system_prompt(ceo)
-        self.assertIn("Objective, Findings, Proposed next steps", prompt)
+        self.assertIn("Task charter", prompt)
+        self.assertIn("measurable acceptance", prompt)
+        self.assertIn("Evidence-backed findings", prompt)
+        self.assertIn("Human approvals required", prompt)
+
+    def test_specialists_must_separate_evidence_and_assumptions(self):
+        from company.agents import load_agents
+        specialist = next(agent for agent in load_agents() if agent.id == "qa_testing")
+        prompt = build_system_prompt(specialist)
+        self.assertIn("Evidence", prompt)
+        self.assertIn("Assumptions", prompt)
+        self.assertIn("Acceptance checks", prompt)
 
     def test_runner_rejects_unknown_task(self):
         with self.assertRaises(KeyError):
