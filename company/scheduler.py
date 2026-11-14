@@ -213,6 +213,7 @@ def seed_due_tasks(store, now: datetime | None = None) -> list[str]:
     if not auto_tasks_enabled():
         return []
     created = []
+    enabled = []
     for task_id, playbook in due_playbooks(now):
         existing = store.get_task(task_id)
         if existing is None:
@@ -221,6 +222,16 @@ def seed_due_tasks(store, now: datetime | None = None) -> list[str]:
             store.create_task(playbook.description, task_id=task_id, approval_required=False)
             store.assign_agents(task_id, agents_for_playbook(playbook))
             created.append(task_id)
+        elif (
+            existing["status"] == "planned"
+            and existing["execution_mode"] == "dry_run"
+            and existing["approval_required"]
+            and existing["description"] == playbook.description
+        ):
+            # Upgrade only legacy rows whose deterministic ID AND full description match
+            # this exact fixed analysis playbook. Manual/recovery tasks remain approval-gated.
+            if store.enable_scheduled_analysis_task(task_id, playbook.description):
+                enabled.append(task_id)
         elif existing["status"] == "failed":
             # Bounded: at most 2 retries, spaced 30 min apart, resumes from saved outputs.
             quota_failure = _is_quota_failure(existing)
@@ -239,4 +250,9 @@ def seed_due_tasks(store, now: datetime | None = None) -> list[str]:
                 )
     if created:
         print(f"scheduler: seeded {len(created)} task(s): {', '.join(created)}", flush=True)
-    return created
+    if enabled:
+        print(
+            "scheduler: enabled legacy fixed analysis task(s): " + ", ".join(enabled),
+            flush=True,
+        )
+    return created + enabled
