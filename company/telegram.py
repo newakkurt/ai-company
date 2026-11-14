@@ -89,13 +89,13 @@ class TelegramIntake:
         if command in ("/start", "/help"):
             self.send_message(
                 chat_id,
-                "AI Company yönetim botu hazır.\\n"
-                "/status - yapılandırma özeti\\n"
-                "/agents - uzman ajan listesi\\n"
-                "/tasks - son görevler\\n"
-                "/report - görev özeti\\n"
-                "/task Açıklama - yeni dry-run görev kaydı\\n"
-                "/approvals - bekleyen onaylar\\n"
+                "AI Company yönetim botu hazır.\n"
+                "/status - yapılandırma özeti\n"
+                "/agents - uzman ajan listesi\n"
+                "/tasks - son görevler\n"
+                "/report - görev özeti\n"
+                "/task Açıklama - yeni dry-run görev kaydı\n"
+                "/approvals - bekleyen onaylar\n"
                 "Not: Bu bot doğrudan cihaz veya dış sistem işlemi çalıştırmaz."
             )
             return True
@@ -114,14 +114,14 @@ class TelegramIntake:
                 "Çalışma modu: analiz / dry-run",
                 "Canlı servis sağlığı bu komutla doğrulanmaz; yalnızca ayarlar gösterilir."
             ]
-            self.send_message(chat_id, "\\n".join(lines))
+            self.send_message(chat_id, "\n".join(lines))
             return True
         if command == "/agents":
             from .agents import agent_summary
             agents = agent_summary()
             lines = [f"Uzman ajanlar ({len(agents)})"]
             lines.extend(f"- {item['name']} [{item['id']}]" for item in agents)
-            self.send_message(chat_id, "\\n".join(lines)[:3800])
+            self.send_message(chat_id, "\n".join(lines)[:3800])
             return True
         if command == "/tasks":
             tasks = self.store.list_tasks(limit=5)
@@ -134,7 +134,7 @@ class TelegramIntake:
                 if len(description) > 110:
                     description = description[:107] + "..."
                 lines.append(f"- {item.get('status', 'unknown')}: {description or item.get('task_id', 'Görev')}")
-            self.send_message(chat_id, "\\n".join(lines)[:3800])
+            self.send_message(chat_id, "\n".join(lines)[:3800])
             return True
         if command == "/report":
             tasks = self.store.list_tasks(limit=100)
@@ -147,7 +147,7 @@ class TelegramIntake:
             if not counts:
                 lines.append("- Henüz görev yok")
             lines.append("Not: Bu rapor yalnızca kayıtlı görevleri sayar; gelir veya satış doğrulaması değildir.")
-            self.send_message(chat_id, "\\n".join(lines)[:3800])
+            self.send_message(chat_id, "\n".join(lines)[:3800])
             return True
         if command == "/approvals":
             from .notifier import approval_keyboard, format_approval_message
